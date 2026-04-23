@@ -1,7 +1,5 @@
 import OpenAI from 'openai';
 
-console.log('API Key loaded:', process.env.OPENAI_API_KEY ? 'Yes' : 'No')
-
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY || '',
   baseURL: 'https://api.gptsapi.net/v1',
