@@ -1,8 +1,16 @@
 import OpenAI from 'openai';
 
+// 添加详细的环境变量日志
+console.log('[AI] Initializing OpenAI client...');
+console.log('[AI] API Key exists:', !!process.env.OPENAI_API_KEY);
+console.log('[AI] API Key length:', process.env.OPENAI_API_KEY?.length || 0);
+console.log('[AI] Base URL:', 'https://api.gptsapi.net/v1');
+
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY || '',
   baseURL: 'https://api.gptsapi.net/v1',
+  timeout: 50000, // 50 秒超时
+  maxRetries: 2, // 最多重试 2 次
 });
 
 export async function generateCaseWithAI(difficulty: string, theme?: string): Promise<any> {
@@ -49,6 +57,10 @@ ${theme ? `主题偏好：${theme}` : ''}
 请确保案件质量达到专业剧本杀水平，推理链条严密，不要有逻辑漏洞。只返回JSON，不要其他文字。`;
 
   try {
+    console.log('[AI] Starting case generation...');
+    console.log('[AI] Difficulty:', difficulty);
+    console.log('[AI] Theme:', theme || 'none');
+
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o',
       messages: [
@@ -65,10 +77,17 @@ ${theme ? `主题偏好：${theme}` : ''}
       response_format: { type: 'json_object' }
     });
 
+    console.log('[AI] Case generation successful');
     const content = completion.choices[0].message.content;
     return JSON.parse(content || '{}');
-  } catch (error) {
-    console.error('AI生成案件失败:', error);
+  } catch (error: any) {
+    console.error('[AI] Case generation failed:', {
+      message: error.message,
+      status: error.status,
+      type: error.type,
+      code: error.code,
+      stack: error.stack,
+    });
     throw error;
   }
 }
