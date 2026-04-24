@@ -62,6 +62,9 @@ export default function InterrogatePage() {
         .filter((e) => discoveredEvidence.includes(e.id))
         .map((e) => `${e.name}: ${e.description}`);
 
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
+
       const response = await fetch('/api/interrogate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -71,7 +74,10 @@ export default function InterrogatePage() {
           evidence: evidenceTexts,
           caseContext: `${caseData.sceneDescription}\n死因：${caseData.deathMethod}`,
         }),
+        signal: controller.signal,
       });
+
+      clearTimeout(timeoutId);
 
       const data = await response.json();
       if (data.success) {
@@ -89,9 +95,25 @@ export default function InterrogatePage() {
             interrogatedSuspects: [...progress.interrogatedSuspects, suspect.id],
           });
         }
+      } else {
+        // 显示错误消息
+        const errorMessage: InterrogationMessage = {
+          role: 'assistant',
+          content: data.error || '抱歉，我现在有点紧张，不知道该说什么...',
+          timestamp: Date.now(),
+        };
+        setMessages((prev) => [...prev, errorMessage]);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('审问失败:', error);
+      const errorMessage: InterrogationMessage = {
+        role: 'assistant',
+        content: error.name === 'AbortError'
+          ? '请求超时，请重试...'
+          : '抱歉，我现在有点紧张，不知道该说什么...',
+        timestamp: Date.now(),
+      };
+      setMessages((prev) => [...prev, errorMessage]);
     } finally {
       setIsLoading(false);
     }
