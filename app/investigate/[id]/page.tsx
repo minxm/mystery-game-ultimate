@@ -128,25 +128,25 @@ export default function InvestigatePage() {
 
       <div className="relative z-10 container mx-auto px-4 py-8">
         {/* 顶部导航 */}
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mb-6 md:mb-8">
           <button
             onClick={() => router.push(`/case/${caseData.id}`)}
             className="flex items-center gap-2 text-gray-400 hover:text-white transition"
           >
             <ArrowLeft className="w-5 h-5" />
-            返回案件
+            <span className="text-sm md:text-base">返回案件</span>
           </button>
-          <h1 className="text-2xl font-bold">{caseData.title}</h1>
+          <h1 className="text-xl md:text-2xl font-bold text-center flex-1">{caseData.title}</h1>
           <button
             onClick={() => setShowSubmit(true)}
-            className="px-6 py-2 bg-blood-600 rounded-lg hover:bg-blood-500 transition"
+            className="w-full md:w-auto px-4 md:px-6 py-2 bg-blood-600 rounded-lg hover:bg-blood-500 transition text-sm md:text-base"
           >
             提交推理
           </button>
         </div>
 
-        {/* 标签页 */}
-        <div className="flex gap-4 mb-8">
+        {/* 标签页 - 移动端优化 */}
+        <div className="grid grid-cols-3 md:flex gap-2 md:gap-4 mb-6 md:mb-8">
           {[
             { id: 'evidence', label: '证据', icon: Search },
             { id: 'suspects', label: '嫌疑人', icon: Users },
@@ -155,14 +155,14 @@ export default function InvestigatePage() {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id as any)}
-              className={`flex items-center gap-2 px-6 py-3 rounded-lg transition ${
+              className={`flex flex-col md:flex-row items-center justify-center gap-1 md:gap-2 px-2 md:px-6 py-3 rounded-lg transition ${
                 activeTab === tab.id
-                  ? 'bg-blood-600 text-white'
-                  : 'glass text-gray-400 hover:text-white'
+                  ? 'bg-blood-600 text-white shadow-lg shadow-blood-500/30'
+                  : 'glass text-gray-400 hover:text-white hover:bg-dark-700'
               }`}
             >
-              <tab.icon className="w-5 h-5" />
-              {tab.label}
+              <tab.icon className="w-5 h-5 md:w-5 md:h-5" />
+              <span className="text-xs md:text-base font-medium">{tab.label}</span>
             </button>
           ))}
         </div>
