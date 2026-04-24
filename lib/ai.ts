@@ -103,10 +103,27 @@ export async function generateImage(prompt: string): Promise<string> {
       size: '1024x1024',
     });
 
-    const imageUrl = response.data?.[0]?.url || '';
-    console.log('[AI] Image generated successfully:', imageUrl ? 'Yes' : 'No');
+    // 检查返回的数据格式
+    const imageData = response.data?.[0];
 
-    return imageUrl;
+    if (!imageData) {
+      console.log('[AI] No image data returned');
+      return '';
+    }
+
+    // 优先使用 URL，如果没有则使用 b64_json
+    if (imageData.url) {
+      console.log('[AI] Image URL generated successfully');
+      return imageData.url;
+    } else if (imageData.b64_json) {
+      // 将 base64 转换为 data URL
+      const dataUrl = `data:image/png;base64,${imageData.b64_json}`;
+      console.log('[AI] Image generated as base64, length:', imageData.b64_json.length);
+      return dataUrl;
+    }
+
+    console.log('[AI] No valid image data found');
+    return '';
   } catch (error: any) {
     console.error('[AI] Image generation failed:', {
       message: error.message,
