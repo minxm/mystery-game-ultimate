@@ -21,20 +21,39 @@ export default function HomePage() {
   const handleStartCase = async () => {
     setIsGenerating(true);
     try {
+      console.log('[Frontend] Starting case generation...');
+
       const response = await fetch('/api/generate-case', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ difficulty: selectedDifficulty }),
       });
 
-      const data = await response.json();
-      if (data.caseId && data.caseData) {
-        sessionStorage.setItem('currentCase', JSON.stringify(data.caseData));
-        router.push(`/case/${data.caseId}`);
+      console.log('[Frontend] Response status:', response.status);
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
-    } catch (error) {
-      console.error('生成案件失败:', error);
-      alert('生成案件失败，请重试');
+
+      const data = await response.json();
+      console.log('[Frontend] Response data:', {
+        success: data.success,
+        hasCaseId: !!data.caseId,
+        hasCaseData: !!data.caseData
+      });
+
+      if (data.success && data.caseId && data.caseData) {
+        console.log('[Frontend] Saving case to sessionStorage...');
+        sessionStorage.setItem('currentCase', JSON.stringify(data.caseData));
+        console.log('[Frontend] Navigating to case page...');
+        router.push(`/case/${data.caseId}`);
+      } else {
+        console.error('[Frontend] Invalid response data:', data);
+        alert('生成案件失败：数据格式错误');
+      }
+    } catch (error: any) {
+      console.error('[Frontend] Case generation failed:', error);
+      alert(`生成案件失败：${error.message || '请重试'}`);
     } finally {
       setIsGenerating(false);
     }
