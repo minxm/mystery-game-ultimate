@@ -12,7 +12,7 @@
 [functions]
   node_bundler = "esbuild"
 
-[[functions."___netlify-server-handler"]]
+[functions."___netlify-server-handler"]
   timeout = 60
 
 # 重定向规则
