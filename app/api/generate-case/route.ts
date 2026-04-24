@@ -13,27 +13,14 @@ export async function POST(request: NextRequest) {
     // 生成案件数据
     const caseContent = await generateCaseWithAI(difficulty);
 
-    console.log('[API] Case content generated, generating images...');
+    console.log('[API] Case content generated, skipping image generation to avoid timeout...');
 
-    // 生成图片（使用 gpt-image-1.5 模型）
-    const victimImagePrompt = `Professional portrait photo of ${caseContent.victim.name}, ${caseContent.victim.age} years old ${caseContent.victim.occupation}, cinematic lighting, mysterious atmosphere, film noir style, high quality, realistic`;
-    const sceneImagePrompt = `Crime scene at ${caseContent.setting}, ${caseContent.sceneDescription.substring(0, 200)}, dark atmospheric lighting, cinematic composition, mystery thriller style, high detail, realistic`;
-
-    const [victimImage, sceneImage] = await Promise.all([
-      generateImage(victimImagePrompt),
-      generateImage(sceneImagePrompt),
-    ]);
-
-    // 生成嫌疑人图片
-    const suspectImages = await Promise.all(
-      caseContent.suspects.map((suspect: any) =>
-        generateImage(
-          `Professional portrait photo of ${suspect.name}, ${suspect.age} years old ${suspect.occupation}, ${suspect.personality} expression, cinematic lighting, mysterious atmosphere, film noir style, high quality, realistic`
-        )
-      )
-    );
-
-    console.log('[API] Images generated, creating case data...');
+    // 暂时跳过图片生成，避免超时
+    // 使用占位图 URL
+    const getPlaceholderImage = (name: string) => {
+      const encodedName = encodeURIComponent(name);
+      return `https://ui-avatars.com/api/?name=${encodedName}&size=512&background=8b0000&color=fff&bold=true`;
+    };
 
     // 组装完整案件数据
     const caseData: CaseData = {
@@ -43,14 +30,14 @@ export async function POST(request: NextRequest) {
       setting: caseContent.setting,
       victim: {
         ...caseContent.victim,
-        imageUrl: victimImage,
+        imageUrl: getPlaceholderImage(caseContent.victim.name),
       },
       deathMethod: caseContent.deathMethod,
       sceneDescription: caseContent.sceneDescription,
-      sceneImageUrl: sceneImage,
-      suspects: caseContent.suspects.map((suspect: any, index: number) => ({
+      sceneImageUrl: getPlaceholderImage('Crime Scene'),
+      suspects: caseContent.suspects.map((suspect: any) => ({
         ...suspect,
-        imageUrl: suspectImages[index],
+        imageUrl: getPlaceholderImage(suspect.name),
       })),
       evidence: caseContent.evidence,
       timeline: caseContent.timeline,
