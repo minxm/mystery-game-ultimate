@@ -13,14 +13,27 @@ export async function POST(request: NextRequest) {
     // 生成案件数据
     const caseContent = await generateCaseWithAI(difficulty);
 
-    console.log('[API] Case content generated, creating case data...');
+    console.log('[API] Case content generated, generating images...');
 
-    // 快速生成占位图（同步，不需要等待）
-    const victimImage = generateImage(`Professional portrait photo of ${caseContent.victim.name}, ${caseContent.victim.age} years old ${caseContent.victim.occupation}`);
-    const sceneImage = generateImage(`Crime scene at ${caseContent.setting}`);
-    const suspectImages = caseContent.suspects.map((suspect: any) =>
-      generateImage(`Professional portrait photo of ${suspect.name}, ${suspect.age} years old ${suspect.occupation}`)
+    // 生成图片（使用 gpt-image-1.5 模型）
+    const victimImagePrompt = `Professional portrait photo of ${caseContent.victim.name}, ${caseContent.victim.age} years old ${caseContent.victim.occupation}, cinematic lighting, mysterious atmosphere, film noir style, high quality, realistic`;
+    const sceneImagePrompt = `Crime scene at ${caseContent.setting}, ${caseContent.sceneDescription.substring(0, 200)}, dark atmospheric lighting, cinematic composition, mystery thriller style, high detail, realistic`;
+
+    const [victimImage, sceneImage] = await Promise.all([
+      generateImage(victimImagePrompt),
+      generateImage(sceneImagePrompt),
+    ]);
+
+    // 生成嫌疑人图片
+    const suspectImages = await Promise.all(
+      caseContent.suspects.map((suspect: any) =>
+        generateImage(
+          `Professional portrait photo of ${suspect.name}, ${suspect.age} years old ${suspect.occupation}, ${suspect.personality} expression, cinematic lighting, mysterious atmosphere, film noir style, high quality, realistic`
+        )
+      )
     );
+
+    console.log('[API] Images generated, creating case data...');
 
     // 组装完整案件数据
     const caseData: CaseData = {

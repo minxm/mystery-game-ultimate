@@ -93,20 +93,30 @@ ${theme ? `主题偏好：${theme}` : ''}
 }
 
 export async function generateImage(prompt: string): Promise<string> {
-  // 第三方 API 不支持图片生成，返回占位图
-  // 使用 UI Avatars 生成头像占位图
   try {
-    // 从 prompt 中提取名字（如果有）
-    const nameMatch = prompt.match(/of ([^,]+)/);
-    const name = nameMatch ? nameMatch[1].trim() : 'Mystery';
+    console.log('[AI] Generating image with prompt:', prompt.substring(0, 100));
 
-    // 使用 UI Avatars API 生成占位图
-    const encodedName = encodeURIComponent(name);
-    return `https://ui-avatars.com/api/?name=${encodedName}&size=512&background=8b0000&color=fff&bold=true`;
-  } catch (error) {
-    console.error('生成占位图失败:', error);
-    // 返回默认占位图
-    return 'https://ui-avatars.com/api/?name=Mystery&size=512&background=8b0000&color=fff&bold=true';
+    const response = await openai.images.generate({
+      model: 'gpt-image-1.5',
+      prompt: prompt,
+      n: 1,
+      size: '1024x1024',
+    });
+
+    const imageUrl = response.data?.[0]?.url || '';
+    console.log('[AI] Image generated successfully:', imageUrl ? 'Yes' : 'No');
+
+    return imageUrl;
+  } catch (error: any) {
+    console.error('[AI] Image generation failed:', {
+      message: error.message,
+      status: error.status,
+      type: error.type,
+      code: error.code,
+    });
+
+    // 如果图片生成失败，返回空字符串
+    return '';
   }
 }
 
