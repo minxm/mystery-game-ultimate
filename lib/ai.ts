@@ -93,20 +93,20 @@ ${theme ? `主题偏好：${theme}` : ''}
 }
 
 export async function generateImage(prompt: string): Promise<string> {
+  // 第三方 API 不支持图片生成，返回占位图
+  // 使用 UI Avatars 生成头像占位图
   try {
-    const response = await openai.images.generate({
-      model: 'dall-e-3',
-      prompt: prompt,
-      n: 1,
-      size: '1024x1024',
-      quality: 'standard',
-      style: 'vivid'
-    });
+    // 从 prompt 中提取名字（如果有）
+    const nameMatch = prompt.match(/of ([^,]+)/);
+    const name = nameMatch ? nameMatch[1].trim() : 'Mystery';
 
-    return response.data?.[0]?.url || '';
+    // 使用 UI Avatars API 生成占位图
+    const encodedName = encodeURIComponent(name);
+    return `https://ui-avatars.com/api/?name=${encodedName}&size=512&background=8b0000&color=fff&bold=true`;
   } catch (error) {
-    console.error('图片生成失败:', error);
-    return '';
+    console.error('生成占位图失败:', error);
+    // 返回默认占位图
+    return 'https://ui-avatars.com/api/?name=Mystery&size=512&background=8b0000&color=fff&bold=true';
   }
 }
 
