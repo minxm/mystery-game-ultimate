@@ -8,25 +8,18 @@ export async function POST(request: NextRequest) {
   try {
     const { difficulty } = await request.json();
 
+    console.log('[API] Starting case generation, difficulty:', difficulty);
+
     // 生成案件数据
     const caseContent = await generateCaseWithAI(difficulty);
 
-    // 生成图片
-    const victimImagePrompt = `Professional portrait photo of ${caseContent.victim.name}, ${caseContent.victim.age} years old ${caseContent.victim.occupation}, cinematic lighting, mysterious atmosphere, film noir style, high quality, realistic`;
-    const sceneImagePrompt = `Crime scene at ${caseContent.setting}, ${caseContent.sceneDescription.substring(0, 200)}, dark atmospheric lighting, cinematic composition, mystery thriller style, high detail, realistic`;
+    console.log('[API] Case content generated, creating case data...');
 
-    const [victimImage, sceneImage] = await Promise.all([
-      generateImage(victimImagePrompt),
-      generateImage(sceneImagePrompt),
-    ]);
-
-    // 生成嫌疑人图片
-    const suspectImages = await Promise.all(
-      caseContent.suspects.map((suspect: any) =>
-        generateImage(
-          `Professional portrait photo of ${suspect.name}, ${suspect.age} years old ${suspect.occupation}, ${suspect.personality} expression, cinematic lighting, mysterious atmosphere, film noir style, high quality, realistic`
-        )
-      )
+    // 快速生成占位图（同步，不需要等待）
+    const victimImage = generateImage(`Professional portrait photo of ${caseContent.victim.name}, ${caseContent.victim.age} years old ${caseContent.victim.occupation}`);
+    const sceneImage = generateImage(`Crime scene at ${caseContent.setting}`);
+    const suspectImages = caseContent.suspects.map((suspect: any) =>
+      generateImage(`Professional portrait photo of ${suspect.name}, ${suspect.age} years old ${suspect.occupation}`)
     );
 
     // 组装完整案件数据
@@ -53,11 +46,19 @@ export async function POST(request: NextRequest) {
       createdAt: Date.now(),
     };
 
+    console.log('[API] Case data created successfully, id:', caseData.id);
+
     return NextResponse.json({ success: true, caseId: caseData.id, caseData });
-  } catch (error) {
-    console.error('生成案件失败:', error);
+  } catch (error: any) {
+    console.error('[API] Case generation failed:', {
+      message: error.message,
+      status: error.status,
+      type: error.type,
+      stack: error.stack?.substring(0, 500),
+    });
 
     // 返回备用案件
+    console.log('[API] Using fallback case');
     const fallbackCase = createFallbackCase(request);
     return NextResponse.json({ success: true, caseId: fallbackCase.id, caseData: fallbackCase });
   }
