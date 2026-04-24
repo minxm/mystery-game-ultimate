@@ -90,7 +90,7 @@ export default function HomePage() {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.6 + i * 0.1 }}
-              className="glass p-4 md:p-6 rounded-lg card-hover"
+              className="glass p-4 md:p-6 rounded-lg card-hover text-center"
             >
               <feature.icon className="w-10 h-10 md:w-12 md:h-12 text-blood-500 mb-3 md:mb-4 mx-auto" />
               <h3 className="text-lg md:text-xl font-bold mb-2">{feature.title}</h3>
