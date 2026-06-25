@@ -14,7 +14,7 @@ import {
   Send,
 } from 'lucide-react';
 import { CaseData, Evidence, Suspect } from '@/lib/types';
-import { storage } from '@/lib/utils';
+import { storage, loadCaseData, getSuspectId } from '@/lib/utils';
 import ParticleBackground from '@/components/ParticleBackground';
 import Image from 'next/image';
 
@@ -31,7 +31,7 @@ export default function InvestigatePage() {
 
   useEffect(() => {
     const caseId = params.id as string;
-    const data = storage.getCase(caseId);
+    const data = loadCaseData(caseId);
     if (data) {
       setCaseData(data);
       const progress = storage.getProgress(caseId);
@@ -56,8 +56,15 @@ export default function InvestigatePage() {
     }
   };
 
-  const handleInterrogate = (suspect: Suspect) => {
-    router.push(`/interrogate/${caseData?.id}?suspect=${suspect.id}`);
+  const handleInterrogate = (suspect: Suspect, index: number) => {
+    if (!caseData) return;
+
+    const suspectId = getSuspectId(suspect, index);
+    sessionStorage.setItem(
+      'interrogateTarget',
+      JSON.stringify({ caseId: caseData.id, suspectId })
+    );
+    router.push(`/interrogate/${caseData.id}?suspect=${encodeURIComponent(suspectId)}`);
   };
 
   const handleSubmitDeduction = async () => {
@@ -206,10 +213,9 @@ export default function InvestigatePage() {
               exit={{ opacity: 0, y: -20 }}
               className="grid grid-cols-1 md:grid-cols-3 gap-6"
             >
-              {caseData.suspects.map((suspect) => (
+              {caseData.suspects.map((suspect, index) => (
                 <motion.div
-                  key={suspect.id}
-                  whileHover={{ scale: 1.05 }}
+                  key={getSuspectId(suspect, index)}
                   className="glass-dark rounded-lg p-6 suspect-card"
                 >
                   {suspect.imageUrl ? (
@@ -246,8 +252,12 @@ export default function InvestigatePage() {
                     </div>
                   </div>
                   <button
-                    onClick={() => handleInterrogate(suspect)}
-                    className="w-full py-2 bg-blood-600 rounded-lg hover:bg-blood-500 transition flex items-center justify-center gap-2"
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleInterrogate(suspect, index);
+                    }}
+                    className="relative z-10 w-full py-2 bg-blood-600 rounded-lg hover:bg-blood-500 transition flex items-center justify-center gap-2"
                   >
                     <MessageSquare className="w-4 h-4" />
                     审问

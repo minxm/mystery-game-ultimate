@@ -49,7 +49,7 @@ export default function HomePage() {
         router.push(`/case/${data.caseId}`);
       } else {
         console.error('[Frontend] Invalid response data:', data);
-        alert('生成案件失败：数据格式错误');
+        alert(data.error || '生成案件失败：数据格式错误');
       }
     } catch (error: any) {
       console.error('[Frontend] Case generation failed:', error);

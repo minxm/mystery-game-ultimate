@@ -116,6 +116,53 @@ export function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 }
 
+/** 从 localStorage 或 sessionStorage 加载案件 */
+export function loadCaseData(caseId: string): CaseData | null {
+  let data = storage.getCase(caseId);
+
+  if (!data && typeof window !== 'undefined') {
+    const sessionData = sessionStorage.getItem('currentCase');
+    if (sessionData) {
+      const parsed = JSON.parse(sessionData) as CaseData;
+      if (parsed.id === caseId) {
+        data = parsed;
+        storage.saveCase(parsed);
+      }
+    }
+  }
+
+  return data;
+}
+
+/** 根据 URL 参数或缓存查找嫌疑人 */
+export function findSuspectByParam(
+  suspects: CaseData['suspects'],
+  param: string | null
+): CaseData['suspects'][number] | null {
+  if (!param) return null;
+
+  const decoded = decodeURIComponent(param);
+  const byId = suspects.find((s) => s.id === decoded);
+  if (byId) return byId;
+
+  const byName = suspects.find((s) => s.name === decoded);
+  if (byName) return byName;
+
+  const index = Number.parseInt(decoded.replace(/^s/i, ''), 10) - 1;
+  if (!Number.isNaN(index) && index >= 0 && index < suspects.length) {
+    return suspects[index];
+  }
+
+  return null;
+}
+
+export function getSuspectId(
+  suspect: CaseData['suspects'][number],
+  index: number
+): string {
+  return suspect.id || `s${index + 1}`;
+}
+
 export function formatTime(seconds: number): string {
   const hours = Math.floor(seconds / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);

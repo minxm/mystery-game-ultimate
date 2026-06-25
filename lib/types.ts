@@ -1,6 +1,7 @@
 export interface Suspect {
   id: string;
   name: string;
+  gender?: 'male' | 'female';
   age: number;
   occupation: string;
   relationship: string;
@@ -37,6 +38,7 @@ export interface CaseData {
   setting: string;
   victim: {
     name: string;
+    gender?: 'male' | 'female';
     age: number;
     occupation: string;
     background: string;

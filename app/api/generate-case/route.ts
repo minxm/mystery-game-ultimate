@@ -2,7 +2,32 @@ import { NextRequest, NextResponse } from 'next/server';
 import { generateCaseWithAI, generateImage } from '@/lib/ai';
 import { generateId } from '@/lib/utils';
 import { CaseData } from '@/lib/types';
-import { SETTINGS, DEATH_METHODS } from '@/lib/constants';
+
+export const maxDuration = 120;
+
+function getPlaceholderImage(name: string) {
+  const encodedName = encodeURIComponent(name);
+  return `https://ui-avatars.com/api/?name=${encodedName}&size=512&background=8b0000&color=fff&bold=true`;
+}
+
+function buildScenePrompt(setting: string, deathMethod: string, description: string) {
+  return `Cinematic noir mystery crime scene photograph, ${setting}, ${deathMethod}, dark atmospheric lighting, dramatic shadows, realistic, moody detective story, no text, no watermark. ${description.slice(0, 120)}`;
+}
+
+function normalizeGender(gender?: string) {
+  return gender === 'female' ? 'female' : 'male';
+}
+
+function buildPortraitPrompt(
+  name: string,
+  gender: string | undefined,
+  age: number,
+  occupation: string,
+  personality: string
+) {
+  const normalizedGender = normalizeGender(gender);
+  return `Realistic portrait photo of a Chinese ${normalizedGender} adult, name ${name}, age ${age}, occupation ${occupation}, personality ${personality}. Keep the face, hairstyle, clothing, and body traits clearly ${normalizedGender}. Dark mystery thriller aesthetic, dramatic side lighting, serious expression, realistic skin texture, no text, no watermark, not androgynous.`;
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -10,19 +35,37 @@ export async function POST(request: NextRequest) {
 
     console.log('[API] Starting case generation, difficulty:', difficulty);
 
-    // 生成案件数据
     const caseContent = await generateCaseWithAI(difficulty);
+    console.log('[API] Case content generated, generating images in parallel...');
 
-    console.log('[API] Case content generated, skipping image generation to avoid timeout...');
+    const scenePrompt = buildScenePrompt(
+      caseContent.setting,
+      caseContent.deathMethod,
+      caseContent.sceneDescription
+    );
+    const victimPrompt = buildPortraitPrompt(
+      caseContent.victim.name,
+      caseContent.victim.gender,
+      caseContent.victim.age,
+      caseContent.victim.occupation,
+      'victim'
+    );
+    const suspectPrompts = caseContent.suspects.map((suspect: any) =>
+      buildPortraitPrompt(
+        suspect.name,
+        suspect.gender,
+        suspect.age,
+        suspect.occupation,
+        suspect.personality
+      )
+    );
 
-    // 暂时跳过图片生成，避免超时
-    // 使用占位图 URL
-    const getPlaceholderImage = (name: string) => {
-      const encodedName = encodeURIComponent(name);
-      return `https://ui-avatars.com/api/?name=${encodedName}&size=512&background=8b0000&color=fff&bold=true`;
-    };
+    const [sceneImageUrl, victimImageUrl, ...suspectImageUrls] = await Promise.all([
+      generateImage(scenePrompt),
+      generateImage(victimPrompt),
+      ...suspectPrompts.map((prompt: string) => generateImage(prompt)),
+    ]);
 
-    // 组装完整案件数据
     const caseData: CaseData = {
       id: generateId(),
       title: caseContent.title,
@@ -30,16 +73,20 @@ export async function POST(request: NextRequest) {
       setting: caseContent.setting,
       victim: {
         ...caseContent.victim,
-        imageUrl: getPlaceholderImage(caseContent.victim.name),
+        imageUrl: victimImageUrl || getPlaceholderImage(caseContent.victim.name),
       },
       deathMethod: caseContent.deathMethod,
       sceneDescription: caseContent.sceneDescription,
-      sceneImageUrl: getPlaceholderImage('Crime Scene'),
-      suspects: caseContent.suspects.map((suspect: any) => ({
+      sceneImageUrl: sceneImageUrl || getPlaceholderImage('Crime Scene'),
+      suspects: caseContent.suspects.map((suspect: any, index: number) => ({
         ...suspect,
-        imageUrl: getPlaceholderImage(suspect.name),
+        id: suspect.id || `s${index + 1}`,
+        imageUrl: suspectImageUrls[index] || getPlaceholderImage(suspect.name),
       })),
-      evidence: caseContent.evidence,
+      evidence: (caseContent.evidence || []).map((item: any, index: number) => ({
+        ...item,
+        id: item.id || `e${index + 1}`,
+      })),
       timeline: caseContent.timeline,
       truth: caseContent.truth,
       redHerrings: caseContent.redHerrings,
@@ -57,14 +104,25 @@ export async function POST(request: NextRequest) {
       stack: error.stack?.substring(0, 500),
     });
 
-    // 返回备用案件
+    if (error.status === 401 || error.message?.includes('SILICONFLOW_API_KEY')) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            error.message ||
+            'API 密钥无效。请在 .env.local 配置 SILICONFLOW_API_KEY（从 https://cloud.siliconflow.cn 获取）',
+        },
+        { status: 401 }
+      );
+    }
+
     console.log('[API] Using fallback case');
-    const fallbackCase = createFallbackCase(request);
+    const fallbackCase = createFallbackCase();
     return NextResponse.json({ success: true, caseId: fallbackCase.id, caseData: fallbackCase });
   }
 }
 
-function createFallbackCase(request: NextRequest): CaseData {
+function createFallbackCase(): CaseData {
   const id = generateId();
   return {
     id,
@@ -73,16 +131,19 @@ function createFallbackCase(request: NextRequest): CaseData {
     setting: '雪山旅馆',
     victim: {
       name: '林雪峰',
+      gender: 'male',
       age: 45,
       occupation: '企业家',
       background: '成功的房地产开发商，在商界颇有名望，但私生活复杂。',
     },
     deathMethod: '神秘中毒',
-    sceneDescription: '死者被发现在自己的房间内，门窗紧闭，呈现典型的密室状态。房间内有一杯红酒，检测出含有剧毒。死者面部发紫，明显是中毒身亡。房间内没有打斗痕迹，一切都很整齐。窗外大雪纷飞，旅馆与外界的道路已被封锁。',
+    sceneDescription:
+      '死者被发现在自己的房间内，门窗紧闭，呈现典型的密室状态。房间内有一杯红酒，检测出含有剧毒。死者面部发紫，明显是中毒身亡。房间内没有打斗痕迹，一切都很整齐。窗外大雪纷飞，旅馆与外界的道路已被封锁。',
     suspects: [
       {
         id: 's1',
         name: '陈美玲',
+        gender: 'female',
         age: 38,
         occupation: '律师',
         relationship: '前妻',
@@ -95,6 +156,7 @@ function createFallbackCase(request: NextRequest): CaseData {
       {
         id: 's2',
         name: '王建国',
+        gender: 'male',
         age: 50,
         occupation: '商业伙伴',
         relationship: '合作伙伴',
@@ -107,6 +169,7 @@ function createFallbackCase(request: NextRequest): CaseData {
       {
         id: 's3',
         name: '李晓雯',
+        gender: 'female',
         age: 28,
         occupation: '秘书',
         relationship: '秘书兼情人',
@@ -234,11 +297,7 @@ function createFallbackCase(request: NextRequest): CaseData {
       ],
       keyClues: ['监控录像', '钥匙副本', '商业合同', '王建国的财务危机'],
     },
-    redHerrings: [
-      '陈美玲的怨恨看起来很可疑',
-      '李晓雯的怀孕秘密',
-      '死者的复杂私生活',
-    ],
+    redHerrings: ['陈美玲的怨恨看起来很可疑', '李晓雯的怀孕秘密', '死者的复杂私生活'],
     createdAt: Date.now(),
   };
 }
