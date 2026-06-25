@@ -17,8 +17,8 @@ if (configError) {
 const client = new OpenAI({
   apiKey: AI_CONFIG.apiKey,
   baseURL: AI_CONFIG.baseURL,
-  timeout: 120000,
-  maxRetries: 2,
+  timeout: 55000,
+  maxRetries: 1,
 });
 
 function assertApiKeyConfigured() {

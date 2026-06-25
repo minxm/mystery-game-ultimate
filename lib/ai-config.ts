@@ -19,14 +19,20 @@ export const AI_CONFIG = {
   baseURL: process.env.AI_BASE_URL || 'https://api.siliconflow.cn/v1',
   apiKey,
   apiKeySource,
-  /** 案件生成 / 评分 — 推理向免费模型 */
-  textModel:
-    process.env.AI_TEXT_MODEL || 'deepseek-ai/DeepSeek-R1-0528-Qwen3-8B',
+  /** 案件生成 / 评分 — 线上默认用快速模型，避免 Serverless 超时 */
+  textModel: process.env.AI_TEXT_MODEL || 'Qwen/Qwen3-8B',
   /** 嫌疑人对话 — 响应更快 */
   chatModel: process.env.AI_CHAT_MODEL || 'Qwen/Qwen3-8B',
   /** 文生图 — 快手 Kolors，悬疑场景表现好 */
   imageModel: process.env.AI_IMAGE_MODEL || 'Kwai-Kolors/Kolors',
 };
+
+/** Netlify 等 Serverless 环境默认跳过 AI 生图，避免 502 超时 */
+export function shouldGenerateImages(): boolean {
+  if (process.env.AI_GENERATE_IMAGES === 'true') return true;
+  if (process.env.AI_GENERATE_IMAGES === 'false') return false;
+  return process.env.NETLIFY !== 'true';
+}
 
 export function getAiConfigError(): string | null {
   if (AI_CONFIG.apiKey) return null;

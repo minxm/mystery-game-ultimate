@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { generateCaseWithAI, generateImage } from '@/lib/ai';
+import { shouldGenerateImages } from '@/lib/ai-config';
 import { generateId } from '@/lib/utils';
 import { CaseData } from '@/lib/types';
 
-export const maxDuration = 120;
+export const maxDuration = 60;
 
 function getPlaceholderImage(name: string) {
   const encodedName = encodeURIComponent(name);
@@ -36,35 +37,44 @@ export async function POST(request: NextRequest) {
     console.log('[API] Starting case generation, difficulty:', difficulty);
 
     const caseContent = await generateCaseWithAI(difficulty);
-    console.log('[API] Case content generated, generating images in parallel...');
 
-    const scenePrompt = buildScenePrompt(
-      caseContent.setting,
-      caseContent.deathMethod,
-      caseContent.sceneDescription
-    );
-    const victimPrompt = buildPortraitPrompt(
-      caseContent.victim.name,
-      caseContent.victim.gender,
-      caseContent.victim.age,
-      caseContent.victim.occupation,
-      'victim'
-    );
-    const suspectPrompts = caseContent.suspects.map((suspect: any) =>
-      buildPortraitPrompt(
-        suspect.name,
-        suspect.gender,
-        suspect.age,
-        suspect.occupation,
-        suspect.personality
-      )
-    );
+    let sceneImageUrl = '';
+    let victimImageUrl = '';
+    let suspectImageUrls: string[] = [];
 
-    const [sceneImageUrl, victimImageUrl, ...suspectImageUrls] = await Promise.all([
-      generateImage(scenePrompt),
-      generateImage(victimPrompt),
-      ...suspectPrompts.map((prompt: string) => generateImage(prompt)),
-    ]);
+    if (shouldGenerateImages()) {
+      console.log('[API] Case content generated, generating images in parallel...');
+
+      const scenePrompt = buildScenePrompt(
+        caseContent.setting,
+        caseContent.deathMethod,
+        caseContent.sceneDescription
+      );
+      const victimPrompt = buildPortraitPrompt(
+        caseContent.victim.name,
+        caseContent.victim.gender,
+        caseContent.victim.age,
+        caseContent.victim.occupation,
+        'victim'
+      );
+      const suspectPrompts = caseContent.suspects.map((suspect: any) =>
+        buildPortraitPrompt(
+          suspect.name,
+          suspect.gender,
+          suspect.age,
+          suspect.occupation,
+          suspect.personality
+        )
+      );
+
+      [sceneImageUrl, victimImageUrl, ...suspectImageUrls] = await Promise.all([
+        generateImage(scenePrompt),
+        generateImage(victimPrompt),
+        ...suspectPrompts.map((prompt: string) => generateImage(prompt)),
+      ]);
+    } else {
+      console.log('[API] Skipping AI image generation (serverless mode, using placeholders)');
+    }
 
     const caseData: CaseData = {
       id: generateId(),

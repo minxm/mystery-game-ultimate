@@ -32,7 +32,11 @@ export default function HomePage() {
       console.log('[Frontend] Response status:', response.status);
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const msg =
+          response.status === 502 || response.status === 504
+            ? '服务器处理超时，请稍后重试或选择简单难度'
+            : `HTTP error! status: ${response.status}`;
+        throw new Error(msg);
       }
 
       const data = await response.json();
