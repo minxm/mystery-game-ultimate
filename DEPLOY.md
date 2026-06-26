@@ -34,7 +34,7 @@ vercel env add OPENAI_API_KEY
 
 然后输入你的 API Key：
 ```
-sk-8QX459b787add3bd1e20854be5327cbd2a1a83125aatJzuL
+your_actual_openai_api_key
 ```
 
 选择环境：
@@ -72,7 +72,7 @@ vercel --prod
 4. **添加环境变量**
    在 "Environment Variables" 部分：
    - Name: `OPENAI_API_KEY`
-   - Value: `sk-8QX459b787add3bd1e20854be5327cbd2a1a83125aatJzuL`
+   - Value: your_actual_openai_api_key
    - 勾选 Production, Preview, Development
 
 5. **点击 Deploy**
@@ -106,7 +106,7 @@ git push -u origin main
 
 必需的环境变量：
 - `OPENAI_API_KEY`: 第三方 API 密钥
-  - 值: `sk-8QX459b787add3bd1e20854be5327cbd2a1a83125aatJzuL`
+  - 值: your_actual_openai_api_key
   - 用于: AI 生成案件、嫌疑人对话、推理评分
 
 ---
