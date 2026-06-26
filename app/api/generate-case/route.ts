@@ -5,6 +5,7 @@ import { generateId } from '@/lib/utils';
 import { CaseData } from '@/lib/types';
 
 export const maxDuration = 60;
+const CASE_GENERATION_TIMEOUT_MS = 18000;
 
 function getPlaceholderImage(name: string) {
   const encodedName = encodeURIComponent(name);
@@ -30,13 +31,33 @@ function buildPortraitPrompt(
   return `Realistic portrait photo of a Chinese ${normalizedGender} adult, name ${name}, age ${age}, occupation ${occupation}, personality ${personality}. Keep the face, hairstyle, clothing, and body traits clearly ${normalizedGender}. Dark mystery thriller aesthetic, dramatic side lighting, serious expression, realistic skin texture, no text, no watermark, not androgynous.`;
 }
 
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const { difficulty } = await request.json();
 
     console.log('[API] Starting case generation, difficulty:', difficulty);
 
-    const caseContent = await generateCaseWithAI(difficulty);
+    const caseContent = await withTimeout(
+      generateCaseWithAI(difficulty),
+      CASE_GENERATION_TIMEOUT_MS,
+      'Case generation'
+    );
 
     let sceneImageUrl = '';
     let victimImageUrl = '';
