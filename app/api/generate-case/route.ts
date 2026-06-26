@@ -5,6 +5,7 @@ import { buildCaseFromPhases } from '@/lib/generate-case-orchestrator';
 import {
   getCaseGenerationMaxRetries,
   getCaseGenerationTimeoutMs,
+  getLocalPhasesTimeoutMs,
   isServerlessEnv,
 } from '@/lib/ai-config';
 import { generateId } from '@/lib/utils';
@@ -89,10 +90,11 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ success: true, jobId });
       }
 
-      // 本地开发：多阶段生成，55s 总超时（3阶段×~15s，留余量；单次 AI 调用上限 40s）
+      // 本地开发：多阶段生成。本地无 Serverless 网关硬超时，提示词变长后生成更慢，
+      // 用更大的可配置总超时（默认 150s），避免还没生成完就回退默认案件。
       const caseData = await withTimeout(
         buildCaseFromPhases(difficulty),
-        55000,
+        getLocalPhasesTimeoutMs(),
         'Local buildCaseFromPhases'
       );
       return NextResponse.json({ success: true, sync: true, caseId: caseData.id, caseData });

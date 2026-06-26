@@ -39,6 +39,30 @@ export function getCaseGenerationMaxRetries(): number {
   return isServerlessEnv() ? 1 : 2;
 }
 
+/**
+ * 本地多阶段生成（base→cast→details）的总超时。
+ * 本地 Next dev 没有 Serverless 的网关硬超时，提示词变长后生成更慢，
+ * 这里给足预算，避免还没生成完就回退默认案件。
+ */
+export function getLocalPhasesTimeoutMs(): number {
+  const configured = process.env.AI_LOCAL_TIMEOUT_MS;
+  if (configured) {
+    const parsed = Number.parseInt(configured, 10);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return 150000;
+}
+
+/** 单个生成阶段的超时，超过则该阶段快速失败并重试，避免卡死拖垮总预算 */
+export function getPhaseTimeoutMs(): number {
+  const configured = process.env.AI_PHASE_TIMEOUT_MS;
+  if (configured) {
+    const parsed = Number.parseInt(configured, 10);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return 50000;
+}
+
 const { key: apiKey, source: apiKeySource } = resolveApiKey();
 
 export const AI_CONFIG = {
