@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { generateCaseWithAI, generateImage } from '@/lib/ai';
-import { shouldGenerateImages } from '@/lib/ai-config';
+import { getCaseGenerationMaxRetries, getCaseGenerationTimeoutMs, shouldGenerateImages } from '@/lib/ai-config';
 import { generateId } from '@/lib/utils';
 import { CaseData } from '@/lib/types';
 
 export const maxDuration = 60;
-const CASE_GENERATION_TIMEOUT_MS = 18000;
 
 function getPlaceholderImage(name: string) {
   const encodedName = encodeURIComponent(name);
@@ -47,17 +46,34 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: str
   }
 }
 
+async function generateCaseWithRetry(difficulty: string) {
+  const timeoutMs = getCaseGenerationTimeoutMs();
+  const maxRetries = getCaseGenerationMaxRetries();
+  let lastError: Error | undefined;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      console.log(`[API] Case generation attempt ${attempt}/${maxRetries}, timeout: ${timeoutMs}ms`);
+      return await withTimeout(generateCaseWithAI(difficulty), timeoutMs, 'Case generation');
+    } catch (error: any) {
+      lastError = error;
+      console.warn(`[API] Case generation attempt ${attempt} failed:`, error.message);
+      if (attempt < maxRetries) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+    }
+  }
+
+  throw lastError ?? new Error('Case generation failed');
+}
+
 export async function POST(request: NextRequest) {
   try {
     const { difficulty } = await request.json();
 
     console.log('[API] Starting case generation, difficulty:', difficulty);
 
-    const caseContent = await withTimeout(
-      generateCaseWithAI(difficulty),
-      CASE_GENERATION_TIMEOUT_MS,
-      'Case generation'
-    );
+    const caseContent = await generateCaseWithRetry(difficulty);
 
     let sceneImageUrl = '';
     let victimImageUrl = '';
@@ -149,7 +165,13 @@ export async function POST(request: NextRequest) {
 
     console.log('[API] Using fallback case');
     const fallbackCase = createFallbackCase();
-    return NextResponse.json({ success: true, caseId: fallbackCase.id, caseData: fallbackCase });
+    return NextResponse.json({
+      success: true,
+      isFallback: true,
+      caseId: fallbackCase.id,
+      caseData: fallbackCase,
+      error: 'AI 生成失败，已使用默认案件。请检查 SILICONFLOW_API_KEY 配置或稍后重试。',
+    });
   }
 }
 

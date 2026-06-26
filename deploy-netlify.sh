@@ -21,7 +21,9 @@ netlify init
 # 步骤 3: 添加环境变量
 echo ""
 echo "步骤 3: 添加环境变量..."
-netlify env:set OPENAI_API_KEY "sk-8QX459b787add3bd1e20854be5327cbd2a1a83125aatJzuL"
+echo "请填入你的硅基流动 API Key（https://cloud.siliconflow.cn）"
+read -p "SILICONFLOW_API_KEY: " SF_KEY
+netlify env:set SILICONFLOW_API_KEY "$SF_KEY"
 
 # 步骤 4: 生产部署
 echo ""

@@ -8,7 +8,8 @@
 [build.environment]
   NODE_VERSION = "18"
   AI_GENERATE_IMAGES = "false"
-  AI_TEXT_MODEL = "Qwen/Qwen3-8B"
+  AI_TEXT_MODEL = "deepseek-ai/DeepSeek-V3"
+  NETLIFY = "true"
 
 # 函数配置
 [functions]
@@ -16,9 +17,3 @@
 
 [functions."___netlify-server-handler"]
   timeout = 60
-
-# 重定向规则
-[[redirects]]
-  from = "/*"
-  to = "/index.html"
-  status = 200

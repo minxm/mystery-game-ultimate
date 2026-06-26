@@ -1,5 +1,5 @@
 import OpenAI from 'openai';
-import { AI_CONFIG, getAiConfigError } from './ai-config';
+import { AI_CONFIG, getAiConfigError, isServerlessEnv } from './ai-config';
 
 const configError = getAiConfigError();
 
@@ -17,8 +17,8 @@ if (configError) {
 const client = new OpenAI({
   apiKey: AI_CONFIG.apiKey,
   baseURL: AI_CONFIG.baseURL,
-  timeout: 55000,
-  maxRetries: 1,
+  timeout: isServerlessEnv() ? 58000 : 55000,
+  maxRetries: 0,
 });
 
 function assertApiKeyConfigured() {
@@ -41,8 +41,8 @@ function extractJsonContent(content: string): string {
   return withoutThink;
 }
 
-export async function generateCaseWithAI(difficulty: string, theme?: string): Promise<any> {
-  const prompt = `你是世界顶级悬疑推理编剧。请生成一个完整的剧本杀案件。
+function buildFullCasePrompt(difficulty: string, theme?: string) {
+  return `你是世界顶级悬疑推理编剧。请生成一个完整的剧本杀案件。
 
 要求：
 1. 三名嫌疑人都必须有充分的作案动机和可疑行为
@@ -56,53 +56,64 @@ export async function generateCaseWithAI(difficulty: string, theme?: string): Pr
 ${theme ? `主题偏好：${theme}` : ''}
 
 请以JSON格式返回，包含：
-- title: 案件标题（吸引人）
-- setting: 案发地点
-- victim: 受害者信息（姓名、性别male或female、年龄、职业、背景）
-- deathMethod: 死亡方式
-- sceneDescription: 案发现场详细描述（500字）
-- suspects: 三名嫌疑人数组，每人包含：
-  - id, name, gender（male或female）, age, occupation, relationship（与死者关系）
-  - alibi（不在场证明）
-  - motive（动机）
-  - personality（性格特点）
-  - secrets（秘密数组，至少2个）
-  - isGuilty（是否是真凶）
-- evidence: 证据数组（至少6条），每条包含：
-  - id, name, description, location, significance
-  - relatedSuspects（相关嫌疑人ID数组）
-- timeline: 时间线数组（至少8个事件），每个包含：
-  - time, event, location, witness
-  - significance（low/medium/high/critical）
-- truth: 真相对象，包含：
-  - killer（凶手姓名）
-  - method（详细作案手法）
-  - motive（真实动机）
-  - process（作案过程数组，至少5步）
-  - keyClues（关键线索数组）
-- redHerrings: 红鲱鱼误导线索数组（至少3条）
+- title, setting
+- victim: { name, gender(male/female), age, occupation, background }
+- deathMethod, sceneDescription(500字)
+- suspects: 3人，每人 { id, name, gender, age, occupation, relationship, alibi, motive, personality, secrets[2], isGuilty }
+- evidence: 6条 { id, name, description, location, significance, relatedSuspects }
+- timeline: 8个事件 { time, event, location, witness, significance }
+- truth: { killer, method, motive, process[5], keyClues }
+- redHerrings: 3条
 
-请确保案件质量达到专业剧本杀水平，推理链条严密，不要有逻辑漏洞。只返回JSON，不要其他文字。`;
+只返回JSON。`;
+}
+
+function buildServerlessCasePrompt(difficulty: string, theme?: string) {
+  return `生成一个剧本杀案件 JSON，难度：${difficulty}${theme ? `，主题：${theme}` : ''}。
+
+字段（保持简洁，控制总输出长度）：
+- title, setting
+- victim: { name, gender(male/female), age, occupation, background(50字内) }
+- deathMethod, sceneDescription(150字内)
+- suspects: 3人 { id(s1/s2/s3), name, gender, age, occupation, relationship, alibi(30字), motive(30字), personality(20字), secrets[1], isGuilty }
+- evidence: 5条 { id(e1-e5), name, description(40字), location, significance, relatedSuspects }
+- timeline: 5个 { time, event(30字), location, significance }
+- truth: { killer, method(80字), motive(40字), process[4], keyClues[3] }
+- redHerrings: 2条
+
+要求：逻辑闭环，真凶仅1人，只返回JSON。`;
+}
+
+export async function generateCaseWithAI(difficulty: string, theme?: string): Promise<any> {
+  const serverless = isServerlessEnv();
+
+  const prompt = serverless
+    ? buildServerlessCasePrompt(difficulty, theme)
+    : buildFullCasePrompt(difficulty, theme);
 
   try {
     assertApiKeyConfigured();
     console.log('[AI] Starting case generation...');
     console.log('[AI] Difficulty:', difficulty);
     console.log('[AI] Theme:', theme || 'none');
+    console.log('[AI] Serverless mode:', serverless);
+    console.log('[AI] Text model:', AI_CONFIG.textModel);
 
     const completion = await client.chat.completions.create({
       model: AI_CONFIG.textModel,
       messages: [
         {
           role: 'system',
-          content: '你是专业的悬疑推理编剧，擅长创作高质量剧本杀案件。请直接输出合法 JSON。',
+          content:
+            '你是悬疑推理编剧。必须直接输出合法 JSON，不要输出思考过程或 markdown 代码块。',
         },
         {
           role: 'user',
           content: prompt,
         },
       ],
-      temperature: 0.9,
+      temperature: serverless ? 0.7 : 0.9,
+      max_tokens: serverless ? 3072 : 8192,
       response_format: { type: 'json_object' },
     });
 

@@ -38,8 +38,11 @@ netlify init
 
 **步骤 3：添加环境变量**
 ```bash
-netlify env:set OPENAI_API_KEY "sk-8QX459b787add3bd1e20854be5327cbd2a1a83125aatJzuL"
+netlify env:set SILICONFLOW_API_KEY "你的硅基流动API密钥"
 ```
+
+> 注册地址：https://cloud.siliconflow.cn  
+> 旧版 `OPENAI_API_KEY` 仍兼容，但建议改用 `SILICONFLOW_API_KEY`。
 
 **步骤 4：生产部署**
 ```bash
@@ -71,8 +74,8 @@ git push -u origin main
    - Build command: `npm run build`
    - Publish directory: `.next`
 5. 添加环境变量：
-   - Key: `OPENAI_API_KEY`
-   - Value: `sk-8QX459b787add3bd1e20854be5327cbd2a1a83125aatJzuL`
+   - Key: `SILICONFLOW_API_KEY`
+   - Value: 你的硅基流动 API Key（https://cloud.siliconflow.cn）
 6. 点击 "Deploy site"
 
 ---

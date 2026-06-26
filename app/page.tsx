@@ -23,28 +23,42 @@ export default function HomePage() {
     try {
       console.log('[Frontend] Starting case generation...');
 
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 65000);
+
       const response = await fetch('/api/generate-case', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ difficulty: selectedDifficulty }),
+        signal: controller.signal,
       });
+
+      clearTimeout(timeoutId);
 
       console.log('[Frontend] Response status:', response.status);
 
       if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
         const msg =
-          response.status === 502 || response.status === 504
-            ? '服务器处理超时，请稍后重试或选择简单难度'
-            : `HTTP error! status: ${response.status}`;
+          response.status === 401
+            ? errorData.error || 'API 密钥未配置或无效，请在 Netlify 环境变量中设置 SILICONFLOW_API_KEY'
+            : response.status === 502 || response.status === 504
+              ? '服务器处理超时，请稍后重试或选择简单难度'
+              : errorData.error || `HTTP error! status: ${response.status}`;
         throw new Error(msg);
       }
 
       const data = await response.json();
       console.log('[Frontend] Response data:', {
         success: data.success,
+        isFallback: data.isFallback,
         hasCaseId: !!data.caseId,
-        hasCaseData: !!data.caseData
+        hasCaseData: !!data.caseData,
       });
+
+      if (data.isFallback) {
+        throw new Error(data.error || 'AI 生成失败，请检查 SILICONFLOW_API_KEY 配置后重试');
+      }
 
       if (data.success && data.caseId && data.caseData) {
         console.log('[Frontend] Saving case to sessionStorage...');
@@ -57,7 +71,11 @@ export default function HomePage() {
       }
     } catch (error: any) {
       console.error('[Frontend] Case generation failed:', error);
-      alert(`生成案件失败：${error.message || '请重试'}`);
+      const message =
+        error.name === 'AbortError'
+          ? '生成超时，请稍后重试或选择简单难度'
+          : error.message || '请重试';
+      alert(`生成案件失败：${message}`);
     } finally {
       setIsGenerating(false);
     }
