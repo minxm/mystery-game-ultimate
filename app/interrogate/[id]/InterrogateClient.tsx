@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { motion } from 'framer-motion';
-import { ArrowLeft, Send, User } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { ArrowLeft, Send, User, Info, X } from 'lucide-react';
 import { CaseData, Suspect, InterrogationMessage } from '@/lib/types';
 import { storage, loadCaseData, findSuspectByParam, getSuspectId } from '@/lib/utils';
 import ParticleBackground from '@/components/ParticleBackground';
@@ -36,6 +36,14 @@ export default function InterrogateClient() {
   const [isLoading, setIsLoading] = useState(false);
   const [isPageLoading, setIsPageLoading] = useState(true);
   const [pageError, setPageError] = useState('');
+  const [imgError, setImgError] = useState(false);
+  const [showTips, setShowTips] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, isLoading]);
 
   useEffect(() => {
     const caseId = params.id as string;
@@ -74,7 +82,6 @@ export default function InterrogateClient() {
 
     setSuspect(normalizedSuspect);
 
-    // 加载已有审问记录，若无则显示初始欢迎语
     const savedMessages = storage.getInterrogation(caseId, normalizedSuspect.id);
     setMessages(
       savedMessages.length > 0
@@ -102,6 +109,7 @@ export default function InterrogateClient() {
     setMessages((prev) => [...prev, userMessage]);
     setInput('');
     setIsLoading(true);
+    inputRef.current?.focus();
 
     try {
       const progress = storage.getProgress(caseData.id);
@@ -136,7 +144,6 @@ export default function InterrogateClient() {
         };
         setMessages((prev) => {
           const updated = [...prev, assistantMessage];
-          // 每次成功回复后持久化整段对话
           storage.saveInterrogation(caseData.id, suspect.id, updated);
           return updated;
         });
@@ -156,7 +163,6 @@ export default function InterrogateClient() {
         setMessages((prev) => [...prev, errorMessage]);
       }
     } catch (error: any) {
-      console.error('审问失败:', error);
       const errorMessage: InterrogationMessage = {
         role: 'assistant',
         content:
@@ -173,22 +179,26 @@ export default function InterrogateClient() {
 
   if (isPageLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="w-16 h-16 border-4 border-blood-500 border-t-transparent rounded-full animate-spin" />
+      <div className="min-h-screen flex items-center justify-center bg-dark-900">
+        <div className="text-center space-y-4">
+          <div className="w-14 h-14 border-2 border-blood-500 border-t-transparent rounded-full animate-spin mx-auto" />
+          <p className="text-blue-400 tracking-widest text-sm animate-pulse">正在连接审问室…</p>
+        </div>
       </div>
     );
   }
 
   if (pageError || !caseData || !suspect) {
     return (
-      <div className="min-h-screen flex items-center justify-center px-4">
-        <div className="glass-dark rounded-lg p-8 max-w-lg w-full text-center">
-          <h1 className="text-2xl font-bold text-blood-500 mb-4">无法进入审问</h1>
-          <p className="text-gray-300 mb-6">{pageError || '页面状态异常，请返回调查页重试。'}</p>
+      <div className="min-h-screen flex items-center justify-center px-4 bg-dark-900">
+        <div className="glass-dark rounded-xl p-8 max-w-lg w-full text-center">
+          <h1 className="text-xl font-bold text-blood-500 mb-4">无法进入审问</h1>
+          <p className="text-gray-300 mb-6 text-sm">{pageError || '页面状态异常，请返回调查页重试。'}</p>
           <button
             type="button"
             onClick={() => router.push(caseData ? `/investigate/${caseData.id}` : '/')}
-            className="px-6 py-3 bg-blood-600 rounded-lg hover:bg-blood-500 transition"
+            className="px-6 py-3 rounded-xl font-bold text-sm transition"
+            style={{ background: 'linear-gradient(135deg,#0066cc,#1e90ff)' }}
           >
             返回上一页
           </button>
@@ -197,136 +207,242 @@ export default function InterrogateClient() {
     );
   }
 
+  const tips = ['询问不在场证明', '用证据质问对方', '注意情绪与回避', '对比不同嫌疑人'];
+
   return (
-    <div className="min-h-screen relative">
+    <div className="h-[100dvh] flex flex-col relative bg-dark-900 overflow-hidden">
       <ParticleBackground />
 
-      <div className="relative z-10 container mx-auto px-4 py-8 max-w-4xl">
-        <div className="flex items-center justify-between mb-8">
+      {/* ── 顶部导航栏 ── */}
+      <header
+        className="relative z-20 flex-shrink-0 border-b border-blue-900/30"
+        style={{ background: 'rgba(4,13,26,0.94)', backdropFilter: 'blur(20px)' }}
+      >
+        <div className="flex items-center gap-2 px-3 py-2.5 sm:px-4 sm:py-3">
+          {/* 返回按钮 */}
           <button
             type="button"
             onClick={() => router.push(`/investigate/${caseData.id}`)}
-            className="flex items-center gap-2 text-gray-400 hover:text-white transition"
+            className="flex items-center gap-1.5 text-blue-400/60 hover:text-blue-400 transition flex-shrink-0 p-1.5 rounded-lg hover:bg-blue-500/10"
           >
-            <ArrowLeft className="w-5 h-5" />
-            返回调查
+            <ArrowLeft className="w-4 h-4" />
+            <span className="hidden sm:inline text-sm">返回</span>
           </button>
-          <h1 className="text-2xl font-bold">审问 - {suspect.name}</h1>
-          <div className="w-24" />
-        </div>
 
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="glass-dark rounded-lg p-6 mb-6"
-        >
-          <div className="flex items-start gap-6">
-            <div className="relative w-24 h-24 rounded-lg overflow-hidden border-2 border-blood-500 flex-shrink-0">
-              {suspect.imageUrl ? (
-                <Image src={suspect.imageUrl} alt={suspect.name} fill className="object-cover" />
+          {/* 嫌疑人信息 */}
+          <div className="flex items-center gap-2.5 flex-1 min-w-0 px-1">
+            {/* 头像 */}
+            <div className="relative w-9 h-9 rounded-full overflow-hidden border border-blood-500/60 flex-shrink-0 shadow-[0_0_12px_rgba(230,57,70,0.3)]">
+              {suspect.imageUrl && !imgError ? (
+                <Image
+                  src={suspect.imageUrl}
+                  alt={suspect.name}
+                  fill
+                  className="object-cover object-top"
+                  unoptimized
+                  onError={() => setImgError(true)}
+                />
               ) : (
                 <div className="w-full h-full bg-dark-700 flex items-center justify-center">
-                  <User className="w-12 h-12 text-gray-600" />
+                  <User className="w-4 h-4 text-gray-500" />
                 </div>
               )}
             </div>
-            <div className="flex-1">
-              <h2 className="text-2xl font-bold mb-2">{suspect.name}</h2>
-              <div className="grid grid-cols-2 gap-2 text-sm">
-                <div>
-                  <span className="text-gray-500">年龄：</span>
-                  <span>{suspect.age} 岁</span>
-                </div>
-                <div>
-                  <span className="text-gray-500">职业：</span>
-                  <span>{suspect.occupation}</span>
-                </div>
-                <div className="col-span-2">
-                  <span className="text-gray-500">关系：</span>
-                  <span>{suspect.relationship}</span>
-                </div>
-                <div className="col-span-2">
-                  <span className="text-gray-500">性格：</span>
-                  <span>{suspect.personality}</span>
-                </div>
+
+            {/* 名字和职业 */}
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blood-600/20 border border-blood-500/30 text-blood-400 font-mono flex-shrink-0">
+                  SUSPECT
+                </span>
+                <h1 className="text-sm font-black text-white truncate">{suspect.name}</h1>
               </div>
+              <p className="text-[11px] text-blue-400/50 font-mono truncate">
+                {suspect.age}岁 · {suspect.occupation}
+              </p>
             </div>
           </div>
-        </motion.div>
 
-        <div className="glass-dark rounded-lg p-6 mb-6 h-[500px] flex flex-col">
-          <div className="flex-1 overflow-y-auto mb-4 space-y-4">
-            {messages.map((message, index) => (
-              <motion.div
-                key={index}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
-              >
-                <div
-                  className={`max-w-[70%] p-4 rounded-lg ${
-                    message.role === 'user'
-                      ? 'bg-blood-600 text-white'
-                      : 'bg-dark-700 text-gray-200'
-                  }`}
-                >
-                  <p className="whitespace-pre-wrap">{message.content}</p>
-                  <p className="text-xs opacity-50 mt-2">
-                    {new Date(message.timestamp).toLocaleTimeString()}
-                  </p>
+          {/* 审问技巧切换 */}
+          <button
+            type="button"
+            onClick={() => setShowTips((v) => !v)}
+            className={`flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center transition ${
+              showTips ? 'text-blue-400 bg-blue-500/15 border border-blue-500/30' : 'text-gray-500 glass hover:text-gray-300'
+            }`}
+          >
+            {showTips ? <X className="w-4 h-4" /> : <Info className="w-4 h-4" />}
+          </button>
+        </div>
+
+        {/* 审问技巧面板 */}
+        <AnimatePresence>
+          {showTips && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="overflow-hidden border-t border-blue-900/20"
+            >
+              <div className="px-4 py-2 flex flex-wrap gap-2">
+                {tips.map((tip) => (
+                  <span
+                    key={tip}
+                    className="text-xs text-blue-300/70 bg-blue-600/10 border border-blue-500/20 px-2.5 py-1 rounded-full"
+                  >
+                    {tip}
+                  </span>
+                ))}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* 扫描线装饰 */}
+        <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-blue-500/40 to-transparent" />
+      </header>
+
+      {/* ── 消息区域 ── */}
+      <div className="relative z-10 flex-1 overflow-y-auto overscroll-contain">
+        <div className="px-3 sm:px-4 py-4 space-y-3 pb-2">
+
+          {/* 审问室信息条 */}
+          <div className="flex items-center gap-3 my-2">
+            <div className="flex-1 h-px bg-blue-900/40" />
+            <span className="text-[10px] font-mono text-blue-500/30 tracking-widest px-2">INTERROGATION ROOM · {new Date().toLocaleDateString('zh-CN')}</span>
+            <div className="flex-1 h-px bg-blue-900/40" />
+          </div>
+
+          {messages.map((message, index) => (
+            <motion.div
+              key={index}
+              initial={{ opacity: 0, y: 8, scale: 0.97 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              transition={{ duration: 0.2 }}
+              className={`flex items-end gap-2 ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+            >
+              {/* 嫌疑人头像 */}
+              {message.role === 'assistant' && (
+                <div className="relative w-7 h-7 rounded-full overflow-hidden border border-blood-500/40 flex-shrink-0 mb-0.5">
+                  {suspect.imageUrl && !imgError ? (
+                    <Image src={suspect.imageUrl} alt={suspect.name} fill className="object-cover object-top" unoptimized onError={() => setImgError(true)} />
+                  ) : (
+                    <div className="w-full h-full bg-dark-700 flex items-center justify-center">
+                      <User className="w-3.5 h-3.5 text-gray-600" />
+                    </div>
+                  )}
                 </div>
-              </motion.div>
-            ))}
-            {isLoading && (
-              <div className="flex justify-start">
-                <div className="bg-dark-700 p-4 rounded-lg">
-                  <div className="flex gap-2">
-                    <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" />
-                    <div
-                      className="w-2 h-2 bg-gray-500 rounded-full animate-bounce"
-                      style={{ animationDelay: '0.1s' }}
-                    />
-                    <div
-                      className="w-2 h-2 bg-gray-500 rounded-full animate-bounce"
-                      style={{ animationDelay: '0.2s' }}
-                    />
+              )}
+
+              <div
+                className={`max-w-[80%] sm:max-w-[72%] px-4 py-3 text-sm leading-relaxed ${
+                  message.role === 'user'
+                    ? 'rounded-2xl rounded-br-sm text-white'
+                    : 'rounded-2xl rounded-bl-sm text-gray-200 border border-blue-900/20'
+                }`}
+                style={
+                  message.role === 'user'
+                    ? {
+                        background: 'linear-gradient(135deg, #0055bb, #1e90ff)',
+                        boxShadow: '0 2px 16px rgba(30,144,255,0.35)',
+                      }
+                    : {
+                        background: 'rgba(10,24,48,0.85)',
+                        backdropFilter: 'blur(8px)',
+                      }
+                }
+              >
+                <p className="whitespace-pre-wrap break-words">{message.content}</p>
+                <p className={`text-[10px] mt-1.5 font-mono ${message.role === 'user' ? 'text-blue-200/50 text-right' : 'text-gray-600'}`}>
+                  {new Date(message.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
+                </p>
+              </div>
+
+              {/* 侦探图标 */}
+              {message.role === 'user' && (
+                <div className="w-7 h-7 rounded-full bg-blue-600/20 border border-blue-500/30 flex items-center justify-center flex-shrink-0 mb-0.5">
+                  <span className="text-xs">🔍</span>
+                </div>
+              )}
+            </motion.div>
+          ))}
+
+          {/* 加载中动画 */}
+          {isLoading && (
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="flex items-end gap-2 justify-start"
+            >
+              <div className="relative w-7 h-7 rounded-full overflow-hidden border border-blood-500/40 flex-shrink-0 mb-0.5">
+                {suspect.imageUrl && !imgError ? (
+                  <Image src={suspect.imageUrl} alt={suspect.name} fill className="object-cover object-top" unoptimized onError={() => setImgError(true)} />
+                ) : (
+                  <div className="w-full h-full bg-dark-700 flex items-center justify-center">
+                    <User className="w-3.5 h-3.5 text-gray-600" />
                   </div>
+                )}
+              </div>
+              <div
+                className="px-4 py-3 rounded-2xl rounded-bl-sm border border-blue-900/20"
+                style={{ background: 'rgba(10,24,48,0.85)' }}
+              >
+                <div className="flex gap-1.5 items-center h-4">
+                  {[0, 150, 300].map((delay) => (
+                    <div
+                      key={delay}
+                      className="w-2 h-2 rounded-full bg-blue-400"
+                      style={{ animation: `bounce 1s ${delay}ms infinite` }}
+                    />
+                  ))}
                 </div>
               </div>
-            )}
-          </div>
+            </motion.div>
+          )}
 
-          <div className="flex gap-3">
-            <input
-              type="text"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
-              placeholder="输入你的问题..."
-              className="flex-1 px-4 py-3 bg-dark-700 rounded-lg border border-gray-700 focus:border-blood-500 focus:outline-none"
-              disabled={isLoading}
-            />
-            <button
-              type="button"
-              onClick={handleSendMessage}
-              disabled={isLoading || !input.trim()}
-              className="px-6 py-3 bg-blood-600 rounded-lg hover:bg-blood-500 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-            >
-              <Send className="w-5 h-5" />
-              发送
-            </button>
-          </div>
+          <div ref={messagesEndRef} />
         </div>
+      </div>
 
-        <div className="glass p-4 rounded-lg">
-          <h3 className="font-bold mb-2 text-blood-500">审问技巧</h3>
-          <ul className="text-sm text-gray-400 space-y-1">
-            <li>• 询问不在场证明的细节</li>
-            <li>• 用已发现的证据质问嫌疑人</li>
-            <li>• 注意嫌疑人的情绪变化和回避</li>
-            <li>• 交叉对比不同嫌疑人的说法</li>
-          </ul>
+      {/* ── 输入区域（固定底部）── */}
+      <div
+        className="relative z-20 flex-shrink-0 border-t border-blue-900/30 px-3 sm:px-4 py-2.5 sm:py-3"
+        style={{ background: 'rgba(4,13,26,0.94)', backdropFilter: 'blur(20px)' }}
+      >
+        <div className="flex gap-2 items-center max-w-4xl mx-auto">
+          <input
+            ref={inputRef}
+            type="text"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSendMessage()}
+            placeholder="输入审问问题…"
+            className="flex-1 min-w-0 px-4 py-3 rounded-xl border text-sm text-white placeholder:text-gray-600 transition focus:outline-none"
+            style={{
+              background: 'rgba(10,24,48,0.8)',
+              borderColor: input.trim() ? 'rgba(30,144,255,0.5)' : 'rgba(30,80,160,0.3)',
+              boxShadow: input.trim() ? '0 0 10px rgba(30,144,255,0.15)' : 'none',
+            }}
+            disabled={isLoading}
+          />
+          <motion.button
+            type="button"
+            whileHover={{ scale: 1.07 }}
+            whileTap={{ scale: 0.93 }}
+            onClick={handleSendMessage}
+            disabled={isLoading || !input.trim()}
+            className="flex-shrink-0 w-12 h-12 rounded-xl flex items-center justify-center transition disabled:opacity-40 disabled:cursor-not-allowed"
+            style={{
+              background: 'linear-gradient(135deg, #0055bb, #1e90ff)',
+              boxShadow: '0 0 18px rgba(30,144,255,0.45)',
+            }}
+          >
+            <Send className="w-5 h-5 text-white" />
+          </motion.button>
         </div>
+        {/* 安全区底部间距（iOS Home Bar） */}
+        <div className="h-safe-area-inset-bottom" />
       </div>
     </div>
   );

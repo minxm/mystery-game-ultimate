@@ -29,6 +29,10 @@ export default function InvestigatePage() {
   const [showSubmit, setShowSubmit] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [interrogatedSuspects, setInterrogatedSuspects] = useState<string[]>([]);
+  const [brokenImages, setBrokenImages] = useState<Set<string>>(new Set());
+
+  const markBroken = (id: string) =>
+    setBrokenImages((prev) => new Set([...prev, id]));
 
   useEffect(() => {
     const caseId = params.id as string;
@@ -114,26 +118,30 @@ export default function InvestigatePage() {
       <div className="relative z-10 container mx-auto px-4 py-6 max-w-6xl">
 
         {/* ── 顶部导航 ── */}
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center gap-2 mb-6">
           <button
             onClick={() => router.push(`/case/${caseData.id}`)}
-            className="flex items-center gap-2 text-blue-400/60 hover:text-blue-400 transition text-sm"
+            className="flex items-center gap-1.5 text-blue-400/60 hover:text-blue-400 transition text-sm flex-shrink-0"
           >
-            <ArrowLeft className="w-4 h-4" /> 返回档案
+            <ArrowLeft className="w-4 h-4" />
+            <span className="hidden sm:inline">返回档案</span>
           </button>
-          <div className="text-center">
-            <h1 className="text-lg md:text-xl font-black tracking-wide conan-title line-clamp-1">{caseData.title}</h1>
-            <p className="text-xs text-blue-500/40 font-mono tracking-widest">INVESTIGATION MODE</p>
+          <div className="flex-1 text-center min-w-0 px-1">
+            <h1 className="text-base md:text-xl font-black tracking-wide conan-title line-clamp-1">{caseData.title}</h1>
+            <p className="text-xs text-blue-500/40 font-mono tracking-widest hidden sm:block">INVESTIGATION MODE</p>
           </div>
           <motion.button
             whileHover={{ scale: 1.04 }}
             whileTap={{ scale: 0.96 }}
             onClick={() => setShowSubmit(true)}
-            className="relative px-4 py-2 rounded-lg text-sm font-bold tracking-wide overflow-hidden group"
+            className="relative flex-shrink-0 px-3 py-2 rounded-lg text-sm font-bold tracking-wide overflow-hidden group"
             style={{ background: 'linear-gradient(135deg,#0066cc,#1e90ff)', boxShadow: '0 0 20px rgba(30,144,255,0.35)' }}
           >
             <span className="absolute inset-0 bg-white/10 translate-x-full group-hover:translate-x-0 transition-transform duration-300" />
-            <span className="relative flex items-center gap-2"><Fingerprint className="w-4 h-4"/>提交推理</span>
+            <span className="relative flex items-center gap-1.5">
+              <Fingerprint className="w-4 h-4"/>
+              <span className="hidden sm:inline">提交推理</span>
+            </span>
           </motion.button>
         </div>
 
@@ -247,8 +255,15 @@ export default function InvestigatePage() {
 
                     {/* 头像区域 */}
                     <div className="relative w-full aspect-[4/3] overflow-hidden">
-                      {suspect.imageUrl ? (
-                        <Image src={suspect.imageUrl} alt={suspect.name} fill className="object-cover object-top" unoptimized />
+                      {suspect.imageUrl && !brokenImages.has(sid) ? (
+                        <Image
+                          src={suspect.imageUrl}
+                          alt={suspect.name}
+                          fill
+                          className="object-cover object-top"
+                          unoptimized
+                          onError={() => markBroken(sid)}
+                        />
                       ) : (
                         <div className="w-full h-full bg-dark-800 flex items-center justify-center">
                           <Users className="w-20 h-20 text-blue-900" />

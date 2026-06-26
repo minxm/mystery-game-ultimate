@@ -3,11 +3,23 @@
 @tailwind utilities;
 
 @layer base {
+  html, body {
+    overflow-x: hidden;
+    /* 使用动态视口高度，解决 iOS Safari 底栏对 100vh 的影响 */
+    min-height: 100dvh;
+  }
   body {
     @apply bg-dark-900 text-gray-100;
     background-image:
       radial-gradient(ellipse at 20% 20%, rgba(30, 144, 255, 0.04) 0%, transparent 60%),
       radial-gradient(ellipse at 80% 80%, rgba(0, 102, 204, 0.04) 0%, transparent 60%);
+  }
+  /* iOS 安全区域支持 */
+  .h-safe-area-inset-bottom {
+    height: env(safe-area-inset-bottom, 0px);
+  }
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom, 12px);
   }
 }
 

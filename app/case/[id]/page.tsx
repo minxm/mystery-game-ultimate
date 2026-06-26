@@ -22,6 +22,10 @@ export default function CasePage() {
   const [caseData, setCaseData] = useState<CaseData | null>(null);
   const [loading, setLoading] = useState(true);
   const [caseNum, setCaseNum] = useState('');
+  const [brokenImages, setBrokenImages] = useState<Set<string>>(new Set());
+
+  const markBroken = (id: string) =>
+    setBrokenImages((prev) => new Set([...prev, id]));
 
   useEffect(() => {
     const caseId = params.id as string;
@@ -162,8 +166,15 @@ export default function CasePage() {
             {/* 头像 */}
             <div className="md:col-span-1">
               <div className="relative w-full aspect-square rounded-xl overflow-hidden border-2 border-blue-500/40 shadow-[0_0_30px_rgba(30,144,255,0.2)]">
-                {caseData.victim.imageUrl ? (
-                  <Image src={caseData.victim.imageUrl} alt={caseData.victim.name} fill className="object-cover" unoptimized />
+                {caseData.victim.imageUrl && !brokenImages.has('victim') ? (
+                  <Image
+                    src={caseData.victim.imageUrl}
+                    alt={caseData.victim.name}
+                    fill
+                    className="object-cover"
+                    unoptimized
+                    onError={() => markBroken('victim')}
+                  />
                 ) : (
                   <div className="w-full h-full bg-dark-700 flex items-center justify-center">
                     <Skull className="w-20 h-20 text-blue-900" />
@@ -260,8 +271,15 @@ export default function CasePage() {
 
                 {/* 头像 */}
                 <div className="relative w-28 h-28 mx-auto mb-4 rounded-xl overflow-hidden border-2 border-blue-500/30 shadow-[0_0_20px_rgba(30,144,255,0.15)] group-hover:border-blue-400/60 transition-colors">
-                  {suspect.imageUrl ? (
-                    <Image src={suspect.imageUrl} alt={suspect.name} fill className="object-cover" unoptimized />
+                  {suspect.imageUrl && !brokenImages.has(`suspect-${index}`) ? (
+                    <Image
+                      src={suspect.imageUrl}
+                      alt={suspect.name}
+                      fill
+                      className="object-cover"
+                      unoptimized
+                      onError={() => markBroken(`suspect-${index}`)}
+                    />
                   ) : (
                     <div className="w-full h-full bg-dark-700 flex items-center justify-center">
                       <Users className="w-12 h-12 text-blue-900" />
