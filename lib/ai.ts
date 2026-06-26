@@ -85,11 +85,39 @@ function buildServerlessCasePrompt(difficulty: string, theme?: string) {
 要求：逻辑闭环，真凶仅1人，只返回JSON。`;
 }
 
+const BASE_THEMES = [
+  { era: '民国时期', location: '租界洋楼内的私人宴会', motif: '家族秘辛与政治暗流' },
+  { era: '当代', location: '孤悬海外的豪华游轮', motif: '巨额遗产争夺' },
+  { era: '当代', location: '山顶封闭式精英学院', motif: '学术竞争与秘密社团' },
+  { era: '现代', location: '深山古镇里的百年老宅', motif: '家族诅咒与隐秘复仇' },
+  { era: '当代', location: '顶级艺术拍卖行的私藏展厅', motif: '赝品与黑市交易' },
+  { era: '现代', location: '荒岛度假别墅', motif: '与外界失联的封闭密室' },
+  { era: '当代', location: '顶层豪华私人会所', motif: '商业阴谋与权贵博弈' },
+  { era: '现代', location: '废弃制药厂改建的艺术空间', motif: '实验伦理与黑色研究' },
+  { era: '民国', location: '西湖边的茶馆与烟花里弄', motif: '谍报交锋与情仇纠葛' },
+  { era: '当代', location: '高铁专属包厢内', motif: '短途旅途中的完美不在场证明' },
+];
+
+const DEATH_METHODS = [
+  '剧毒下药', '机关陷阱', '伪造意外溺水', '高空坠落', '钝器袭击',
+  '药物过量伪装自杀', '勒颈窒息', '放火焚烧', '电击伪装触电事故',
+];
+
 function buildCaseBasePrompt(difficulty: string) {
-  return `生成一个剧本杀案件的基础设定，难度${difficulty}。
-角色命名要求：使用有特色、个性鲜明的中文名（参考柯南式人物命名，可取自自然意象、诗词字词、历史典故等），严禁使用张三、李四、王五等平凡名字。
-严格按下面的 JSON 结构填写真实内容（不要照抄示例文字），字段简短：
-{"title":"沉月楼连环案","setting":"外滩旁的百年洋楼","victim":{"name":"沈云霄","gender":"male","age":52,"occupation":"古玩鉴定师","background":"以鉴定真伪闻名上海，藏有多件国宝，私下却以假乱真欺诈买家"},"deathMethod":"从高处坠落","sceneDescription":"死者被发现在顶层露台边缘，面朝下倒在青石板上，脑后有钝器击打痕迹。栏杆旁散落一枚袖扣，远处灯火阑珊，秋雨打湿了衣衫，现场诡异而静谧。"}
+  const theme = BASE_THEMES[Math.floor(Math.random() * BASE_THEMES.length)];
+  const deathHint = DEATH_METHODS[Math.floor(Math.random() * DEATH_METHODS.length)];
+  return `你是悬疑推理编剧，请基于以下随机主题生成一个全新的剧本杀案件基础设定，难度${difficulty}。
+
+主题方向（必须以此为核心，不得偏离）：
+- 时代背景：${theme.era}
+- 案发地点类型：${theme.location}
+- 核心矛盾：${theme.motif}
+- 参考死亡方式：${deathHint}（可据情节调整）
+
+命名要求：使用有特色的中文名（取自自然意象、诗词、历史典故，如"凌霜月""方若水""沈云霄"等风格），严禁张三李四。
+
+按以下 JSON 结构输出（字段内容完全原创，不得照抄任何示例）：
+{"title":"【原创案件标题】","setting":"【具体案发场所描述】","victim":{"name":"【受害者名】","gender":"male或female","age":数字,"occupation":"【职业】","background":"【50字内背景，含隐秘动机】"},"deathMethod":"【死亡方式】","sceneDescription":"【150字内现场描述，细节生动】"}
 只输出 JSON。`;
 }
 
@@ -100,12 +128,21 @@ function buildCaseCastPrompt(difficulty: string, base: Record<string, unknown>) 
     victim: base.victim,
     deathMethod: base.deathMethod,
   });
+  // 随机指定凶手位置，从 AI 生成阶段就打乱，彻底避免凶手总在末位
+  const guiltyPos = Math.floor(Math.random() * 3); // 0,1,2
+  const guiltyId = `s${guiltyPos + 1}`; // s1, s2, or s3
+  const innocentIds = ['s1', 's2', 's3'].filter(id => id !== guiltyId).join(' 和 ');
+
   return `难度${difficulty}。已知案件背景：${summary}
 请生成 3 名嫌疑人和案件真相。
-角色命名要求：使用有特色、个性鲜明的中文名（参考柯南式人物命名风格，可取自自然意象、诗词、历史典故），严禁使用张三、李四、王五等平凡名字。
-严格按下面的 JSON 结构填写真实内容（不要照抄示例文字）：
-{"suspects":[{"id":"s1","name":"程烟雨","gender":"female","age":28,"occupation":"秘书","relationship":"死者助理","alibi":"案发时声称在整理档案","motive":"工资拖欠数月","personality":"沉默寡言","secrets":["私下在找新工作"],"isGuilty":false},{"id":"s2","name":"方若水","gender":"male","age":45,"occupation":"合伙人","relationship":"死者商业伙伴","alibi":"案发时声称在打电话","motive":"被死者背刺夺走项目","personality":"城府极深表面和善","secrets":["已暗中转移公司资产"],"isGuilty":true},{"id":"s3","name":"祁凌霜","gender":"female","age":36,"occupation":"前妻","relationship":"离婚配偶","alibi":"案发时声称在餐厅用餐","motive":"争夺抚养权","personality":"情绪化易激动","secrets":["仍持有死者公司股份"],"isGuilty":false}],"truth":{"killer":"方若水","method":"趁其不备推落后伪造意外","motive":"阻止资产转移被曝光","process":["步骤一","步骤二"],"keyClues":["关键线索一"]}}
-要求：suspects 恰好 3 人，id 依次为 s1/s2/s3；仅 1 人 isGuilty 为 true，且必须与 truth.killer 同名。只输出 JSON。`;
+命名要求：使用有特色中文名（取自自然意象、诗词、历史典故），严禁张三李四。
+所有内容必须完全原创，与示例无关。
+
+【强制要求】凶手必须是 ${guiltyId}（isGuilty:true），${innocentIds} 的 isGuilty 必须为 false。
+
+按以下 JSON 结构输出（suspects 顺序固定为 s1、s2、s3）：
+{"suspects":[{"id":"s1","name":"【名字】","gender":"male或female","age":数字,"occupation":"【职业】","relationship":"【与受害者关系】","alibi":"【不在场证明，30字内】","motive":"【作案动机，30字内】","personality":"【性格特征，20字内】","secrets":["【隐藏秘密】"],"isGuilty":【true或false】},{"id":"s2",...},{"id":"s3",...}],"truth":{"killer":"【与isGuilty:true的嫌疑人同名】","method":"【作案手法，80字内】","motive":"【真实动机，40字内】","process":["步骤1","步骤2","步骤3"],"keyClues":["线索1","线索2"]}}
+只输出 JSON。`;
 }
 
 function buildCaseDetailsPrompt(difficulty: string, core: Record<string, unknown>) {

@@ -146,9 +146,18 @@ export async function POST(request: NextRequest) {
   }
 }
 
+function shuffleArray<T>(arr: T[]): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
 function createFallbackCase(): CaseData {
   const id = generateId();
-  return {
+  const caseData = {
     id,
     title: '雪山旅馆的密室谋杀',
     difficulty: 'medium',
@@ -324,4 +333,7 @@ function createFallbackCase(): CaseData {
     redHerrings: ['陈美玲的怨恨看起来很可疑', '李晓雯的怀孕秘密', '死者的复杂私生活'],
     createdAt: Date.now(),
   };
+  // 随机打乱嫌疑人顺序，避免凶手永远在固定位置
+  caseData.suspects = shuffleArray(caseData.suspects) as typeof caseData.suspects;
+  return caseData as CaseData;
 }
