@@ -45,12 +45,18 @@ export const AI_CONFIG = {
   baseURL: process.env.AI_BASE_URL || 'https://api.siliconflow.cn/v1',
   apiKey,
   apiKeySource,
-  /** 案件生成 — 线上用 7B 指令模型，单次需在 Netlify 26s 内完成 */
-  textModel:
-    process.env.AI_TEXT_MODEL ||
-    (process.env.NETLIFY === 'true' ? 'Qwen/Qwen2.5-7B-Instruct' : 'Qwen/Qwen3-8B'),
-  /** 嫌疑人对话 — 响应更快 */
-  chatModel: process.env.AI_CHAT_MODEL || 'Qwen/Qwen3-8B',
+  /**
+   * 案件生成 — 用 72B 指令模型。
+   * 注意：7B/8B 小模型在生成中等长度中文 JSON 时会退化成重复乱码
+   * （finish_reason=length、JSON 解析失败、请求超时），72B 稳定可靠。
+   */
+  textModel: process.env.AI_TEXT_MODEL || 'Qwen/Qwen2.5-72B-Instruct',
+  /**
+   * 嫌疑人对话 — 用 7B 指令模型（非思考模型，响应快）。
+   * 注意：Qwen3 系列是思考模型，在硅基流动上会输出大量 reasoning_content，
+   * 单轮对话耗时 ~24s 且 max_tokens 易被思考链占满；短问答用 7B 更合适（~6s）。
+   */
+  chatModel: process.env.AI_CHAT_MODEL || 'Qwen/Qwen2.5-7B-Instruct',
   /** 文生图 — 快手 Kolors，悬疑场景表现好 */
   imageModel: process.env.AI_IMAGE_MODEL || 'Kwai-Kolors/Kolors',
 };

@@ -9,20 +9,35 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
+        // 深海军蓝背景 —— 柯南风核心底色
         dark: {
-          900: '#0a0a0f',
-          800: '#12121a',
-          700: '#1a1a28',
-          600: '#252538',
+          900: '#040d1a',
+          800: '#0a1830',
+          700: '#0f2545',
+          600: '#1a3560',
         },
+        // 电光蓝主色调（替代旧的血红色，保留类名不动以兼容全部页面）
         blood: {
-          500: '#8b0000',
-          600: '#6b0000',
+          500: '#1e90ff',
+          600: '#0066cc',
+        },
+        // 红色危险/线索高亮
+        danger: {
+          500: '#e63946',
+          600: '#c1121f',
+        },
+        // 金色推理高亮（发现关键线索时）
+        clue: {
+          400: '#ffd60a',
+          500: '#e9c46a',
         },
         mystery: {
           500: '#4a5568',
           600: '#2d3748',
         }
+      },
+      fontFamily: {
+        sans: ['var(--font-noto)', 'ui-sans-serif', 'system-ui', 'sans-serif'],
       },
       animation: {
         'float': 'float 6s ease-in-out infinite',
@@ -30,6 +45,7 @@ const config: Config = {
         'glow': 'glow 2s ease-in-out infinite',
         'fadeIn': 'fadeIn 0.5s ease-in',
         'slideUp': 'slideUp 0.6s ease-out',
+        'scan-h': 'scanH 3s linear infinite',
       },
       keyframes: {
         float: {
@@ -47,6 +63,10 @@ const config: Config = {
         slideUp: {
           '0%': { transform: 'translateY(30px)', opacity: '0' },
           '100%': { transform: 'translateY(0)', opacity: '1' },
+        },
+        scanH: {
+          '0%': { transform: 'translateX(-100%)' },
+          '100%': { transform: 'translateX(100%)' },
         },
       },
     },

@@ -79,19 +79,19 @@ export const CASE_GENERATION_PROMPT = `你是世界顶级悬疑推理编剧。�
 
 export const IMAGE_GENERATION_PROMPTS = {
   victim: (name: string, age: number, occupation: string) =>
-    `Professional portrait photo of ${name}, ${age} years old ${occupation}, cinematic lighting, mysterious atmosphere, film noir style, high quality, realistic`,
+    `anime character portrait, ${name}, ${age} years old ${occupation}, Detective Conan anime style, cel-shaded, clean lineart, Japanese mystery anime, dark navy background, dramatic blue lighting, high quality illustration`,
 
   suspect: (name: string, age: number, occupation: string, personality: string) =>
-    `Professional portrait photo of ${name}, ${age} years old ${occupation}, ${personality} expression, cinematic lighting, mysterious atmosphere, film noir style, high quality, realistic`,
+    `anime character portrait, ${name}, ${age} years old ${occupation}, ${personality} expression, Detective Conan anime style, cel-shaded, suspicious look, Japanese mystery anime, dark atmosphere, vivid colors, high quality illustration`,
 
   scene: (setting: string, description: string) =>
-    `Crime scene at ${setting}, ${description}, dark atmospheric lighting, cinematic composition, mystery thriller style, high detail, realistic, wide angle`,
+    `anime crime scene background, ${setting}, ${description}, Detective Conan style, detailed environment art, dark navy and blue tones, dramatic lighting, wide angle, Japanese mystery anime, cinematic composition`,
 
   evidence: (name: string, description: string) =>
-    `Close-up photo of ${name}, ${description}, evidence photography style, dramatic lighting, high detail, forensic quality, realistic`,
+    `anime style evidence illustration, ${name}, ${description}, Detective Conan mystery clue, cel-shaded, dramatic spotlight lighting, dark background, detailed, high quality anime art`,
 
   map: (setting: string) =>
-    `Floor plan and layout map of ${setting}, architectural blueprint style, top-down view, labeled rooms, professional diagram, clean lines, dark theme`
+    `anime style investigation map of ${setting}, Detective Conan blueprint, top-down floor plan, glowing blue lineart on dark navy background, labeled rooms, mystery detective anime aesthetic`,
 };
 
 export const INTERROGATION_SYSTEM_PROMPT = (suspect: any, evidence: string[], caseContext: string) => `

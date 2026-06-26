@@ -2,23 +2,66 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { motion } from 'framer-motion';
-import { Trophy, Home, Share2, Clock, Target, Brain, AlertCircle } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import {
+  Trophy, Home, Share2, Clock, Target, Brain, AlertCircle,
+  Shield, ChevronDown, ChevronUp, Sparkles, Unlock,
+} from 'lucide-react';
 import { CaseData } from '@/lib/types';
 import { storage, getScoreRating, formatTime } from '@/lib/utils';
 import ParticleBackground from '@/components/ParticleBackground';
 
 interface Evaluation {
   score: number;
-  breakdown: {
-    killer: number;
-    method: number;
-    motive: number;
-    logic: number;
-  };
+  breakdown: { killer: number; method: number; motive: number; logic: number };
   feedback: string;
   rating: string;
+  killerCorrect?: boolean;
   missedClues: string[];
+}
+
+const SCORE_ITEMS = [
+  { key: 'killer', label: '凶手身份', max: 40, icon: Target },
+  { key: 'method', label: '作案手法', max: 30, icon: Brain },
+  { key: 'motive', label: '作案动机', max: 20, icon: AlertCircle },
+  { key: 'logic',  label: '逻辑链条', max: 10, icon: Shield },
+];
+
+function RingScore({ score }: { score: number }) {
+  const r = 54;
+  const circ = 2 * Math.PI * r;
+  const offset = circ * (1 - score / 100);
+  return (
+    <div className="relative w-44 h-44 mx-auto">
+      <svg className="w-full h-full -rotate-90" viewBox="0 0 120 120">
+        <circle cx="60" cy="60" r={r} fill="none" stroke="rgba(30,144,255,0.1)" strokeWidth="8"/>
+        <motion.circle
+          cx="60" cy="60" r={r} fill="none"
+          stroke="url(#scoreGrad)" strokeWidth="8" strokeLinecap="round"
+          strokeDasharray={circ}
+          initial={{ strokeDashoffset: circ }}
+          animate={{ strokeDashoffset: offset }}
+          transition={{ duration: 1.8, ease: 'easeOut', delay: 0.2 }}
+        />
+        <defs>
+          <linearGradient id="scoreGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stopColor="#0066cc"/>
+            <stop offset="100%" stopColor="#00d4ff"/>
+          </linearGradient>
+        </defs>
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center">
+        <motion.span
+          className="text-5xl font-black text-white"
+          initial={{ scale:0, opacity:0 }} animate={{ scale:1, opacity:1 }}
+          transition={{ type:'spring', delay:0.5, duration:0.6 }}
+        >
+          {score}
+        </motion.span>
+        <span className="text-xs text-blue-400/60 font-mono tracking-widest">SCORE</span>
+      </div>
+    </div>
+  );
 }
 
 export default function ResultPage() {
@@ -28,134 +71,166 @@ export default function ResultPage() {
   const [evaluation, setEvaluation] = useState<Evaluation | null>(null);
   const [timeSpent, setTimeSpent] = useState(0);
   const [showTruth, setShowTruth] = useState(false);
+  const [shown, setShown] = useState(false);
 
   useEffect(() => {
     const caseId = params.id as string;
     const data = storage.getCase(caseId);
-    if (data) {
-      setCaseData(data);
-    }
-
+    if (data) setCaseData(data);
     const evalData = sessionStorage.getItem('evaluation');
-    if (evalData) {
-      setEvaluation(JSON.parse(evalData));
-    }
-
+    if (evalData) setEvaluation(JSON.parse(evalData));
     const progress = storage.getProgress(caseId);
-    if (progress && progress.endTime) {
-      const spent = Math.floor((progress.endTime - progress.startTime) / 1000);
-      setTimeSpent(spent);
-    }
+    if (progress?.endTime) setTimeSpent(Math.floor((progress.endTime - progress.startTime) / 1000));
+    setTimeout(() => setShown(true), 200);
   }, [params.id]);
 
   const handleShare = () => {
     const text = `我在AI剧本杀《${caseData?.title}》中获得了${evaluation?.score}分！评级：${evaluation?.rating}`;
-    if (navigator.share) {
-      navigator.share({
-        title: 'AI剧本杀',
-        text: text,
-      });
-    } else {
-      navigator.clipboard.writeText(text);
-      alert('已复制到剪贴板');
-    }
+    if (navigator.share) navigator.share({ title: 'AI剧本杀', text });
+    else { navigator.clipboard.writeText(text); alert('已复制到剪贴板'); }
   };
 
   if (!caseData || !evaluation) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="w-16 h-16 border-4 border-blood-500 border-t-transparent rounded-full animate-spin" />
+      <div className="min-h-screen flex items-center justify-center bg-dark-900">
+        <div className="w-14 h-14 border-2 border-blood-500 border-t-transparent rounded-full animate-spin" />
       </div>
     );
   }
 
-  const scoreInfo = getScoreRating(evaluation.score);
+  const scoreInfo = getScoreRating(evaluation.score, evaluation.killerCorrect);
+
+  const getBarColor = (score: number, max: number) => {
+    const ratio = score / max;
+    if (ratio >= 0.8) return 'from-blue-600 to-cyan-400';
+    if (ratio >= 0.5) return 'from-blue-700 to-blue-400';
+    return 'from-gray-700 to-gray-500';
+  };
 
   return (
-    <div className="min-h-screen relative">
+    <div className="min-h-screen relative bg-dark-900">
       <ParticleBackground />
 
-      <div className="relative z-10 container mx-auto px-4 py-12 max-w-4xl">
-        {/* 评分展示 */}
+      {/* 四角装饰 */}
+      <div className="fixed inset-0 pointer-events-none z-10">
+        {['top-0 left-0 border-l border-t','top-0 right-0 border-r border-t','bottom-0 left-0 border-l border-b','bottom-0 right-0 border-r border-b'].map((cls,i)=>(
+          <div key={i} className={`absolute w-12 h-12 border-blue-500/20 ${cls}`}/>
+        ))}
+      </div>
+
+      <div className="relative z-10 container mx-auto px-4 py-10 max-w-3xl">
+
+        {/* ── 标题 ── */}
         <motion.div
-          initial={{ opacity: 0, scale: 0.8 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ type: 'spring', duration: 0.8 }}
-          className="text-center mb-12"
+          initial={{ opacity:0, y:-20 }} animate={{ opacity:1, y:0 }}
+          className="text-center mb-10"
         >
-          <Trophy className="w-24 h-24 text-yellow-400 mx-auto mb-6 animate-float" />
-          <h1 className="text-6xl font-bold mb-4 text-glow">{evaluation.score}</h1>
-          <p className={`text-3xl font-bold mb-2 ${scoreInfo.color}`}>{scoreInfo.rating}</p>
-          <p className="text-xl text-gray-400">{scoreInfo.description}</p>
+          <p className="text-xs font-mono text-blue-500/50 tracking-[0.4em] mb-1">CASE CLOSED</p>
+          <h1 className="text-2xl font-black conan-title tracking-wider">{caseData.title}</h1>
         </motion.div>
 
-        {/* 详细评分 */}
+        {/* ── 评分环 + 评级 ── */}
         <motion.div
-          initial={{ opacity: 0, y: 30 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.3 }}
-          className="glass-dark rounded-lg p-8 mb-8"
+          initial={{ opacity:0, scale:0.85 }} animate={{ opacity:1, scale:1 }}
+          transition={{ type:'spring', duration:0.9 }}
+          className="rounded-2xl p-8 mb-6 relative overflow-hidden"
+          style={{ background:'linear-gradient(160deg,rgba(10,24,48,0.95),rgba(4,13,26,0.98))', border:'1px solid rgba(30,144,255,0.25)', boxShadow:'0 0 60px rgba(30,144,255,0.1)' }}
         >
-          <h2 className="text-2xl font-bold mb-6">评分详情</h2>
-          <div className="space-y-4">
-            {[
-              { label: '凶手身份', score: evaluation.breakdown.killer, max: 40, icon: Target },
-              { label: '作案手法', score: evaluation.breakdown.method, max: 30, icon: Brain },
-              { label: '动机分析', score: evaluation.breakdown.motive, max: 20, icon: AlertCircle },
-              { label: '逻辑链条', score: evaluation.breakdown.logic, max: 10, icon: Clock },
-            ].map((item, index) => (
-              <motion.div
-                key={item.label}
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: 0.4 + index * 0.1 }}
+          <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-blue-500/50 to-transparent"/>
+
+          <RingScore score={evaluation.score} />
+
+          <div className="text-center mt-6">
+            <motion.div
+              initial={{ opacity:0, y:10 }} animate={{ opacity:1, y:0 }} transition={{ delay:0.8 }}
+            >
+              <span
+                className={`text-4xl font-black tracking-wide block mb-1 ${scoreInfo.color}`}
+                style={{ textShadow: `0 0 30px currentColor` }}
               >
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    <item.icon className="w-5 h-5 text-blood-500" />
-                    <span className="font-medium">{item.label}</span>
-                  </div>
-                  <span className="text-lg font-bold">
-                    {item.score} / {item.max}
-                  </span>
-                </div>
-                <div className="w-full bg-dark-700 rounded-full h-3 overflow-hidden">
-                  <motion.div
-                    initial={{ width: 0 }}
-                    animate={{ width: `${(item.score / item.max) * 100}%` }}
-                    transition={{ delay: 0.5 + index * 0.1, duration: 0.8 }}
-                    className="h-full bg-gradient-to-r from-blood-600 to-blood-500"
-                  />
-                </div>
-              </motion.div>
-            ))}
+                {scoreInfo.rating}
+              </span>
+              <p className="text-gray-400 text-sm">{scoreInfo.description}</p>
+            </motion.div>
           </div>
 
-          <div className="mt-6 pt-6 border-t border-gray-700">
-            <div className="flex items-center gap-4 text-gray-400">
-              <Clock className="w-5 h-5" />
-              <span>用时：{formatTime(timeSpent)}</span>
-            </div>
+          {/* CASE SOLVED 印章 */}
+          {evaluation.score >= 70 && (
+            <motion.div
+              initial={{ rotate:-15, scale:0, opacity:0 }}
+              animate={{ rotate:-12, scale:1, opacity:0.9 }}
+              transition={{ delay:1.2, type:'spring', duration:0.6 }}
+              className="absolute top-6 right-6 border-2 border-blue-400/60 rounded px-3 py-1 text-blue-400/60 text-xs font-black tracking-widest"
+            >
+              SOLVED
+            </motion.div>
+          )}
+
+          {/* 用时 */}
+          <div className="flex items-center justify-center gap-2 mt-5 text-gray-500 text-xs font-mono">
+            <Clock className="w-3.5 h-3.5"/> 用时 {formatTime(timeSpent)}
           </div>
         </motion.div>
 
-        {/* AI 评价 */}
+        {/* ── 评分细则 ── */}
         <motion.div
-          initial={{ opacity: 0, y: 30 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.6 }}
-          className="glass-dark rounded-lg p-8 mb-8"
+          initial={{ opacity:0, y:20 }} animate={{ opacity:1, y:0 }} transition={{ delay:0.4 }}
+          className="rounded-2xl p-6 mb-5 glass-dark"
         >
-          <h2 className="text-2xl font-bold mb-4">专家点评</h2>
-          <p className="text-gray-300 leading-relaxed">{evaluation.feedback}</p>
+          <div className="flex items-center gap-2 mb-5">
+            <Trophy className="w-5 h-5 text-clue-400"/>
+            <h2 className="text-base font-black tracking-wide text-white">评分明细</h2>
+          </div>
+          <div className="space-y-5">
+            {SCORE_ITEMS.map((item, i) => {
+              const rawScore = (evaluation.breakdown as any)[item.key] as number;
+              const pct = Math.min(100, (rawScore / item.max) * 100);
+              return (
+                <motion.div key={item.key}
+                  initial={{ opacity:0, x:-20 }} animate={{ opacity:1, x:0 }} transition={{ delay: 0.5 + i*0.1 }}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <item.icon className="w-4 h-4 text-blue-400/70"/>
+                      <span className="text-sm font-bold">{item.label}</span>
+                    </div>
+                    <span className="text-sm font-mono font-bold text-white">
+                      {rawScore} <span className="text-gray-600">/ {item.max}</span>
+                    </span>
+                  </div>
+                  <div className="relative w-full bg-dark-800 rounded-full h-2.5 overflow-hidden">
+                    <motion.div
+                      initial={{ width:0 }}
+                      animate={{ width:`${pct}%` }}
+                      transition={{ delay: 0.6 + i*0.1, duration:0.9, ease:'easeOut' }}
+                      className={`h-full rounded-full bg-gradient-to-r ${getBarColor(rawScore, item.max)}`}
+                      style={{ boxShadow: pct > 50 ? '0 0 8px rgba(30,144,255,0.5)' : undefined }}
+                    />
+                  </div>
+                </motion.div>
+              );
+            })}
+          </div>
+        </motion.div>
+
+        {/* ── 专家点评 ── */}
+        <motion.div
+          initial={{ opacity:0, y:20 }} animate={{ opacity:1, y:0 }} transition={{ delay:0.6 }}
+          className="rounded-2xl p-6 mb-5 glass-dark"
+        >
+          <div className="flex items-center gap-2 mb-4">
+            <Sparkles className="w-5 h-5 text-clue-400"/>
+            <h2 className="text-base font-black tracking-wide text-white">侦探长评语</h2>
+          </div>
+          <p className="text-gray-300 text-sm leading-relaxed">{evaluation.feedback}</p>
 
           {evaluation.missedClues.length > 0 && (
-            <div className="mt-6 pt-6 border-t border-gray-700">
-              <h3 className="text-lg font-bold mb-3 text-yellow-400">遗漏的关键线索</h3>
+            <div className="mt-5 pt-5 border-t border-blue-900/30">
+              <h3 className="text-sm font-bold mb-3 text-clue-400 tracking-wide">遗漏线索</h3>
               <ul className="space-y-2">
-                {evaluation.missedClues.map((clue, index) => (
-                  <li key={index} className="flex items-start gap-2 text-gray-400">
-                    <span className="text-blood-500">•</span>
+                {evaluation.missedClues.map((clue, i) => (
+                  <li key={i} className="flex items-start gap-2 text-gray-400 text-sm">
+                    <span className="text-blue-500 mt-0.5">▸</span>
                     <span>{clue}</span>
                   </li>
                 ))}
@@ -164,100 +239,99 @@ export default function ResultPage() {
           )}
         </motion.div>
 
-        {/* 真相揭晓 */}
+        {/* ── 真相揭晓 ── */}
         <motion.div
-          initial={{ opacity: 0, y: 30 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.8 }}
-          className="glass-dark rounded-lg p-8 mb-8"
+          initial={{ opacity:0, y:20 }} animate={{ opacity:1, y:0 }} transition={{ delay:0.8 }}
+          className="rounded-2xl mb-7 overflow-hidden"
+          style={{ border:'1px solid rgba(30,144,255,0.2)', background:'rgba(10,24,48,0.9)' }}
         >
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-2xl font-bold text-blood-500">真相揭晓</h2>
-            <button
-              onClick={() => setShowTruth(!showTruth)}
-              className="px-4 py-2 bg-blood-600 rounded-lg hover:bg-blood-500 transition"
-            >
-              {showTruth ? '隐藏真相' : '查看真相'}
-            </button>
-          </div>
+          <button
+            onClick={() => setShowTruth(!showTruth)}
+            className="w-full flex items-center justify-between px-6 py-5 group"
+          >
+            <div className="flex items-center gap-3">
+              <Unlock className="w-5 h-5 text-danger-400"/>
+              <span className="text-base font-black tracking-wide text-danger-400">真相解密</span>
+            </div>
+            <div className="flex items-center gap-2 text-xs text-gray-500 font-mono">
+              {showTruth ? <><ChevronUp className="w-4 h-4 text-blue-400"/> 收起</>
+                        : <><ChevronDown className="w-4 h-4 text-gray-500"/> 点击查看</>}
+            </div>
+          </button>
 
-          {showTruth && (
-            <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              className="space-y-6"
-            >
-              <div>
-                <h3 className="text-lg font-bold mb-2 text-yellow-400">真凶</h3>
-                <p className="text-gray-300">{caseData.truth.killer}</p>
-              </div>
-
-              <div>
-                <h3 className="text-lg font-bold mb-2 text-yellow-400">作案手法</h3>
-                <p className="text-gray-300">{caseData.truth.method}</p>
-              </div>
-
-              <div>
-                <h3 className="text-lg font-bold mb-2 text-yellow-400">真实动机</h3>
-                <p className="text-gray-300">{caseData.truth.motive}</p>
-              </div>
-
-              <div>
-                <h3 className="text-lg font-bold mb-2 text-yellow-400">作案过程</h3>
-                <div className="space-y-3">
-                  {caseData.truth.process.map((step, index) => (
-                    <motion.div
-                      key={index}
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: index * 0.1 }}
-                      className="flex items-start gap-3"
-                    >
-                      <div className="w-8 h-8 rounded-full bg-blood-600 flex items-center justify-center flex-shrink-0 mt-1">
-                        {index + 1}
-                      </div>
-                      <p className="text-gray-300 flex-1">{step}</p>
-                    </motion.div>
+          <AnimatePresence>
+            {showTruth && (
+              <motion.div
+                initial={{ height:0, opacity:0 }} animate={{ height:'auto', opacity:1 }} exit={{ height:0, opacity:0 }}
+                transition={{ duration:0.35 }}
+                className="overflow-hidden"
+              >
+                <div className="px-6 pb-7 space-y-5 border-t border-blue-900/30">
+                  {[
+                    { label:'真凶', value: caseData.truth.killer },
+                    { label:'手法', value: caseData.truth.method },
+                    { label:'动机', value: caseData.truth.motive },
+                  ].map(({ label, value }) => (
+                    <div key={label} className="pt-5">
+                      <p className="text-xs font-mono text-blue-400/50 tracking-widest mb-1">{label.toUpperCase()}</p>
+                      <p className="text-gray-200 text-sm leading-relaxed">{value}</p>
+                    </div>
                   ))}
+
+                  <div className="pt-5">
+                    <p className="text-xs font-mono text-blue-400/50 tracking-widest mb-3">PROCESS</p>
+                    <div className="space-y-3">
+                      {caseData.truth.process.map((step, i) => (
+                        <motion.div
+                          key={i}
+                          initial={{ opacity:0, x:-16 }} animate={{ opacity:1, x:0 }} transition={{ delay: i*0.08 }}
+                          className="flex items-start gap-3"
+                        >
+                          <div className="w-6 h-6 rounded-full bg-blue-600/30 border border-blue-500/40 flex items-center justify-center flex-shrink-0 mt-0.5">
+                            <span className="text-xs font-mono text-blue-400">{i+1}</span>
+                          </div>
+                          <p className="text-gray-300 text-sm leading-relaxed">{step}</p>
+                        </motion.div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="pt-5">
+                    <p className="text-xs font-mono text-blue-400/50 tracking-widest mb-3">KEY CLUES</p>
+                    <ul className="space-y-2">
+                      {caseData.truth.keyClues.map((clue, i) => (
+                        <li key={i} className="flex items-start gap-2 text-gray-400 text-sm">
+                          <span className="text-clue-400 mt-0.5">◆</span> {clue}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                 </div>
-              </div>
-
-              <div>
-                <h3 className="text-lg font-bold mb-2 text-yellow-400">关键线索</h3>
-                <ul className="space-y-2">
-                  {caseData.truth.keyClues.map((clue, index) => (
-                    <li key={index} className="flex items-start gap-2 text-gray-300">
-                      <span className="text-blood-500">•</span>
-                      <span>{clue}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </motion.div>
-          )}
+              </motion.div>
+            )}
+          </AnimatePresence>
         </motion.div>
 
-        {/* 操作按钮 */}
+        {/* ── 操作按钮 ── */}
         <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 1 }}
-          className="flex gap-4 justify-center"
+          initial={{ opacity:0 }} animate={{ opacity:1 }} transition={{ delay:1 }}
+          className="flex gap-3"
         >
           <button
             onClick={() => router.push('/')}
-            className="flex items-center gap-2 px-8 py-3 glass rounded-lg hover:bg-dark-700 transition"
+            className="flex-1 flex items-center justify-center gap-2 py-3 glass rounded-xl hover:bg-dark-700 transition text-sm font-bold text-gray-400 hover:text-white"
           >
-            <Home className="w-5 h-5" />
-            返回首页
+            <Home className="w-4 h-4"/> 返回首页
           </button>
-          <button
+          <motion.button
+            whileHover={{ scale:1.02 }} whileTap={{ scale:0.97 }}
             onClick={handleShare}
-            className="flex items-center gap-2 px-8 py-3 bg-blood-600 rounded-lg hover:bg-blood-500 transition"
+            className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-sm overflow-hidden relative group"
+            style={{ background:'linear-gradient(135deg,#0066cc,#1e90ff)', boxShadow:'0 0 20px rgba(30,144,255,0.3)' }}
           >
-            <Share2 className="w-5 h-5" />
-            分享成绩
-          </button>
+            <span className="absolute inset-0 bg-white/10 -translate-x-full group-hover:translate-x-full transition-transform duration-500"/>
+            <Share2 className="w-4 h-4 relative"/> <span className="relative">分享战绩</span>
+          </motion.button>
         </motion.div>
       </div>
     </div>

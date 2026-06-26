@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { generateCaseWithAI } from '@/lib/ai';
 import { buildCaseDataWithImages } from '@/lib/case-assembler';
-import { setCaseJob } from '@/lib/case-job-store';
 import { buildCaseFromPhases } from '@/lib/generate-case-orchestrator';
 import {
   getCaseGenerationMaxRetries,
@@ -12,31 +11,6 @@ import { generateId } from '@/lib/utils';
 import { CaseData } from '@/lib/types';
 
 export const maxDuration = 60;
-
-function getSiteUrl() {
-  return (
-    process.env.URL ||
-    process.env.DEPLOY_PRIME_URL ||
-    process.env.DEPLOY_URL ||
-    'https://mystery-game-ultimate.netlify.app'
-  );
-}
-
-async function triggerBackgroundJob(jobId: string, difficulty: string) {
-  const bgUrl = `${getSiteUrl()}/.netlify/functions/generate-case-background`;
-  console.log('[API] Triggering background function:', bgUrl);
-
-  const response = await fetch(bgUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jobId, difficulty }),
-  });
-
-  if (!response.ok && response.status !== 202) {
-    const text = await response.text().catch(() => '');
-    throw new Error(`Background function trigger failed: ${response.status} ${text}`);
-  }
-}
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
@@ -83,23 +57,24 @@ export async function POST(request: NextRequest) {
     console.log('[API] Case generation request:', { difficulty, phase, serverless: isServerlessEnv() });
 
     if (phase === 'start') {
-      const jobId = generateId();
-      await setCaseJob(jobId, { status: 'pending', createdAt: Date.now() });
-
       if (isServerlessEnv()) {
-        await triggerBackgroundJob(jobId, difficulty);
-        return NextResponse.json({ success: true, jobId, async: true });
+        // Serverless 环境（Netlify 等）：单次 AI 调用，在 60s 函数时限内完成
+        // 注意：background function 需要 Functions v2 才能访问 Netlify Blobs，
+        //       为避免 MissingBlobsEnvironmentError，改用同步生成
+        const caseContent = await generateCaseWithRetry('Serverless case generation', () =>
+          generateCaseWithAI(difficulty)
+        );
+        const caseData = await buildCaseDataWithImages(difficulty, caseContent);
+        return NextResponse.json({ success: true, sync: true, caseId: caseData.id, caseData });
       }
 
-      const caseData = await buildCaseFromPhases(difficulty);
-      return NextResponse.json({ success: true, sync: true, caseId: caseData.id, caseData });
-    }
-
-    if (isServerlessEnv()) {
-      return NextResponse.json(
-        { success: false, error: '请使用 phase: start 启动异步生成' },
-        { status: 400 }
+      // 本地开发：多阶段生成，55s 总超时（3阶段×~15s，留余量；单次 AI 调用上限 40s）
+      const caseData = await withTimeout(
+        buildCaseFromPhases(difficulty),
+        55000,
+        'Local buildCaseFromPhases'
       );
+      return NextResponse.json({ success: true, sync: true, caseId: caseData.id, caseData });
     }
 
     const caseContent = await generateCaseWithRetry('Case generation', () =>
@@ -135,24 +110,17 @@ export async function POST(request: NextRequest) {
       error.message?.includes('timeout') ||
       error.code === 'ECONNABORTED';
 
-    if (isTimeout) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: 'AI 生成超时，请重试',
-        },
-        { status: 504 }
-      );
-    }
-
-    console.log('[API] Using fallback case');
+    console.log('[API] Using fallback case, isTimeout:', isTimeout);
     const fallbackCase = createFallbackCase();
     return NextResponse.json({
       success: true,
+      sync: true,
       isFallback: true,
       caseId: fallbackCase.id,
       caseData: fallbackCase,
-      error: 'AI 生成失败，已使用默认案件。请检查 SILICONFLOW_API_KEY 配置或稍后重试。',
+      error: isTimeout
+        ? 'AI 生成超时（网络较慢），已使用默认案件，可正常游戏。'
+        : 'AI 生成失败，已使用默认案件。请检查 SILICONFLOW_API_KEY 配置或稍后重试。',
     });
   }
 }

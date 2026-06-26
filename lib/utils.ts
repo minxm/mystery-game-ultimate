@@ -1,9 +1,10 @@
-import { CaseData, GameProgress, UserStats } from './types';
+import { CaseData, GameProgress, InterrogationMessage, UserStats } from './types';
 
 const STORAGE_KEYS = {
   CASES: 'mystery_cases',
   PROGRESS: 'mystery_progress',
   STATS: 'mystery_stats',
+  INTERROGATIONS: 'mystery_interrogations',
 };
 
 export const storage = {
@@ -102,12 +103,33 @@ export const storage = {
     }
   },
 
+  // 审问记录持久化（key = caseId__suspectId）
+  saveInterrogation(caseId: string, suspectId: string, messages: InterrogationMessage[]): void {
+    if (typeof window === 'undefined') return;
+    const all = this.getAllInterrogations();
+    all[`${caseId}__${suspectId}`] = messages;
+    localStorage.setItem(STORAGE_KEYS.INTERROGATIONS, JSON.stringify(all));
+  },
+
+  getInterrogation(caseId: string, suspectId: string): InterrogationMessage[] {
+    if (typeof window === 'undefined') return [];
+    const all = this.getAllInterrogations();
+    return all[`${caseId}__${suspectId}`] ?? [];
+  },
+
+  getAllInterrogations(): Record<string, InterrogationMessage[]> {
+    if (typeof window === 'undefined') return {};
+    const data = localStorage.getItem(STORAGE_KEYS.INTERROGATIONS);
+    return data ? JSON.parse(data) : {};
+  },
+
   // 清除数据
   clearAll(): void {
     if (typeof window !== 'undefined') {
       localStorage.removeItem(STORAGE_KEYS.CASES);
       localStorage.removeItem(STORAGE_KEYS.PROGRESS);
       localStorage.removeItem(STORAGE_KEYS.STATS);
+      localStorage.removeItem(STORAGE_KEYS.INTERROGATIONS);
     }
   },
 };
@@ -207,11 +229,31 @@ export function getDifficultyLabel(difficulty: string): string {
   }
 }
 
-export function getScoreRating(score: number): {
+export function getScoreRating(
+  score: number,
+  killerCorrect?: boolean
+): {
   rating: string;
   color: string;
   description: string;
 } {
+  // 指错凶手：无论其他得分多少，都属于"指错人"类评级
+  if (killerCorrect === false) {
+    if (score >= 30) {
+      return {
+        rating: '被凶手玩弄',
+        color: 'text-orange-400',
+        description: '你抓到了一些线索，却被凶手的诡计引向了错误的人...'
+      };
+    }
+    return {
+      rating: '冤枉好人',
+      color: 'text-red-400',
+      description: '真凶逍遥法外，无辜者蒙冤...'
+    };
+  }
+
+  // 指对凶手（或未提供凶手判定信息时按分数）：最低也是"合格侦探"
   if (score >= 95) {
     return {
       rating: '神探',
@@ -226,11 +268,14 @@ export function getScoreRating(score: number): {
       description: '出色的推理能力，真相在你手中！'
     };
   }
-  if (score >= 60) {
+  if (killerCorrect === true || score >= 60) {
     return {
       rating: '合格侦探',
       color: 'text-green-400',
-      description: '基本找到了真相，继续努力！'
+      description:
+        killerCorrect === true
+          ? '你成功锁定了真凶，但作案手法或动机还需再推敲！'
+          : '基本找到了真相，继续努力！'
     };
   }
   if (score >= 40) {

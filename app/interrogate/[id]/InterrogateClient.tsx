@@ -73,13 +73,20 @@ export default function InterrogateClient() {
     };
 
     setSuspect(normalizedSuspect);
-    setMessages([
-      {
-        role: 'assistant',
-        content: `我是${normalizedSuspect.name}。你想问我什么？`,
-        timestamp: Date.now(),
-      },
-    ]);
+
+    // 加载已有审问记录，若无则显示初始欢迎语
+    const savedMessages = storage.getInterrogation(caseId, normalizedSuspect.id);
+    setMessages(
+      savedMessages.length > 0
+        ? savedMessages
+        : [
+            {
+              role: 'assistant',
+              content: `我是${normalizedSuspect.name}。你想问我什么？`,
+              timestamp: Date.now(),
+            },
+          ]
+    );
     setIsPageLoading(false);
   }, [params.id]);
 
@@ -127,7 +134,12 @@ export default function InterrogateClient() {
           content: data.response,
           timestamp: Date.now(),
         };
-        setMessages((prev) => [...prev, assistantMessage]);
+        setMessages((prev) => {
+          const updated = [...prev, assistantMessage];
+          // 每次成功回复后持久化整段对话
+          storage.saveInterrogation(caseData.id, suspect.id, updated);
+          return updated;
+        });
 
         if (progress && !progress.interrogatedSuspects.includes(suspect.id)) {
           storage.saveProgress({

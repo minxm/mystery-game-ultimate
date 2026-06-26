@@ -1,12 +1,18 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import { Noto_Sans_SC } from "next/font/google";
 import "./globals.css";
 
-const inter = Inter({ subsets: ["latin"] });
+// Noto Sans SC：清晰的中文无衬线，带动漫感的现代气质
+const notoSansSC = Noto_Sans_SC({
+  subsets: ["latin"],
+  weight: ["400", "500", "700", "900"],
+  variable: "--font-noto",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
-  title: "AI 剧本杀 - 沉浸式推理游戏",
-  description: "体验电影级的AI生成推理案件，挑战你的侦探能力",
+  title: "AI 侦探推理 — 柯南的世界",
+  description: "沉浸式 AI 推理案件，挑战你的侦探直觉",
 };
 
 export default function RootLayout({
@@ -16,7 +22,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="zh-CN">
-      <body className={inter.className}>{children}</body>
+      <body className={`${notoSansSC.variable} font-sans`}>{children}</body>
     </html>
   );
 }
