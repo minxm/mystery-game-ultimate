@@ -17,7 +17,7 @@ if (configError) {
 const client = new OpenAI({
   apiKey: AI_CONFIG.apiKey,
   baseURL: AI_CONFIG.baseURL,
-  timeout: isServerlessEnv() ? 58000 : 55000,
+  timeout: isServerlessEnv() ? 26000 : 55000,
   maxRetries: 0,
 });
 
@@ -82,6 +82,83 @@ function buildServerlessCasePrompt(difficulty: string, theme?: string) {
 - redHerrings: 2条
 
 要求：逻辑闭环，真凶仅1人，只返回JSON。`;
+}
+
+function buildCaseBasePrompt(difficulty: string) {
+  return `难度${difficulty}。只输出JSON：
+{"title":"","setting":"","victim":{"name","gender","age","occupation","background"},"deathMethod":"","sceneDescription":""}
+字段简短。`;
+}
+
+function buildCaseCastPrompt(difficulty: string, base: Record<string, unknown>) {
+  return `难度${difficulty}。案件：${JSON.stringify(base)}
+只输出JSON：
+{"suspects":[{"id":"s1|s2|s3","name","gender","age","occupation","relationship","alibi","motive","personality","secrets":[""],"isGuilty":false}],
+"truth":{"killer":"","method":"","motive":"","process":[""],"keyClues":[""]}}
+3嫌疑人，1真凶。`;
+}
+
+function buildCaseDetailsPrompt(difficulty: string, core: Record<string, unknown>) {
+  const summary = JSON.stringify({
+    title: core.title,
+    setting: core.setting,
+    victim: (core.victim as any)?.name,
+    suspects: (core.suspects as any[])?.map((s) => ({ id: s.id, name: s.name })),
+    killer: (core.truth as any)?.killer,
+  });
+  return `难度${difficulty}。案件：${summary}
+只输出JSON：
+{"evidence":[{"id":"e1-e4","name","description","location","significance","relatedSuspects":[]}],
+"timeline":[{"time","event","location","significance"}],
+"redHerrings":[""]}`;
+}
+
+async function callCaseJson(prompt: string, maxTokens: number) {
+  assertApiKeyConfigured();
+  const serverless = isServerlessEnv();
+  const completion = await client.chat.completions.create({
+    model: AI_CONFIG.textModel,
+    messages: [
+      {
+        role: 'system',
+        content: '你是悬疑推理编剧。只输出合法 JSON，不要 markdown 或思考过程。',
+      },
+      { role: 'user', content: prompt },
+    ],
+    temperature: serverless ? 0.6 : 0.9,
+    max_tokens: maxTokens,
+    response_format: { type: 'json_object' },
+  });
+  const content = completion.choices[0].message.content;
+  return JSON.parse(extractJsonContent(content || '{}'));
+}
+
+export async function generateCaseBaseWithAI(difficulty: string): Promise<any> {
+  console.log('[AI] Generating case base...');
+  return callCaseJson(buildCaseBasePrompt(difficulty), 512);
+}
+
+export async function generateCaseCastWithAI(
+  difficulty: string,
+  base: Record<string, unknown>
+): Promise<any> {
+  console.log('[AI] Generating case cast...');
+  return callCaseJson(buildCaseCastPrompt(difficulty, base), 800);
+}
+
+export async function generateCaseCoreWithAI(difficulty: string, theme?: string): Promise<any> {
+  const base = await generateCaseBaseWithAI(difficulty);
+  const cast = await generateCaseCastWithAI(difficulty, base);
+  return { ...base, ...cast };
+}
+
+export async function generateCaseDetailsWithAI(
+  difficulty: string,
+  core: Record<string, unknown>,
+  theme?: string
+): Promise<any> {
+  console.log('[AI] Generating case details...');
+  return callCaseJson(buildCaseDetailsPrompt(difficulty, core), 900);
 }
 
 export async function generateCaseWithAI(difficulty: string, theme?: string): Promise<any> {

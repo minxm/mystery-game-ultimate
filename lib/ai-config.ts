@@ -32,7 +32,7 @@ export function getCaseGenerationTimeoutMs(): number {
     const parsed = Number.parseInt(configured, 10);
     if (Number.isFinite(parsed) && parsed > 0) return parsed;
   }
-  return isServerlessEnv() ? 55000 : 18000;
+  return isServerlessEnv() ? 25000 : 18000;
 }
 
 export function getCaseGenerationMaxRetries(): number {
@@ -45,10 +45,10 @@ export const AI_CONFIG = {
   baseURL: process.env.AI_BASE_URL || 'https://api.siliconflow.cn/v1',
   apiKey,
   apiKeySource,
-  /** 案件生成 / 评分 — 线上默认用 DeepSeek-V3，响应更快 */
+  /** 案件生成 — 线上用 7B 指令模型，单次需在 Netlify 26s 内完成 */
   textModel:
     process.env.AI_TEXT_MODEL ||
-    (process.env.NETLIFY === 'true' ? 'deepseek-ai/DeepSeek-V3' : 'Qwen/Qwen3-8B'),
+    (process.env.NETLIFY === 'true' ? 'Qwen/Qwen2.5-7B-Instruct' : 'Qwen/Qwen3-8B'),
   /** 嫌疑人对话 — 响应更快 */
   chatModel: process.env.AI_CHAT_MODEL || 'Qwen/Qwen3-8B',
   /** 文生图 — 快手 Kolors，悬疑场景表现好 */

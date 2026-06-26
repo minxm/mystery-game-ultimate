@@ -1,6 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { generateCaseWithAI, generateImage } from '@/lib/ai';
-import { getCaseGenerationMaxRetries, getCaseGenerationTimeoutMs, shouldGenerateImages } from '@/lib/ai-config';
+import {
+  generateCaseBaseWithAI,
+  generateCaseCastWithAI,
+  generateCaseCoreWithAI,
+  generateCaseDetailsWithAI,
+  generateCaseWithAI,
+  generateImage,
+} from '@/lib/ai';
+import {
+  getCaseGenerationMaxRetries,
+  getCaseGenerationTimeoutMs,
+  isServerlessEnv,
+  shouldGenerateImages,
+} from '@/lib/ai-config';
 import { generateId } from '@/lib/utils';
 import { CaseData } from '@/lib/types';
 
@@ -46,99 +58,162 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: str
   }
 }
 
-async function generateCaseWithRetry(difficulty: string) {
+async function generateCaseWithRetry<T>(label: string, fn: () => Promise<T>): Promise<T> {
   const timeoutMs = getCaseGenerationTimeoutMs();
   const maxRetries = getCaseGenerationMaxRetries();
   let lastError: Error | undefined;
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      console.log(`[API] Case generation attempt ${attempt}/${maxRetries}, timeout: ${timeoutMs}ms`);
-      return await withTimeout(generateCaseWithAI(difficulty), timeoutMs, 'Case generation');
+      console.log(`[API] ${label} attempt ${attempt}/${maxRetries}, timeout: ${timeoutMs}ms`);
+      return await withTimeout(fn(), timeoutMs, label);
     } catch (error: any) {
       lastError = error;
-      console.warn(`[API] Case generation attempt ${attempt} failed:`, error.message);
+      console.warn(`[API] ${label} attempt ${attempt} failed:`, error.message);
       if (attempt < maxRetries) {
-        await new Promise((resolve) => setTimeout(resolve, 1000));
+        await new Promise((resolve) => setTimeout(resolve, 500));
       }
     }
   }
 
-  throw lastError ?? new Error('Case generation failed');
+  throw lastError ?? new Error(`${label} failed`);
+}
+
+function buildCaseData(difficulty: string, caseContent: any): CaseData {
+  return {
+    id: generateId(),
+    title: caseContent.title,
+    difficulty: difficulty as CaseData['difficulty'],
+    setting: caseContent.setting,
+    victim: {
+      ...caseContent.victim,
+      imageUrl: getPlaceholderImage(caseContent.victim.name),
+    },
+    deathMethod: caseContent.deathMethod,
+    sceneDescription: caseContent.sceneDescription,
+    sceneImageUrl: getPlaceholderImage('Crime Scene'),
+    suspects: caseContent.suspects.map((suspect: any, index: number) => ({
+      ...suspect,
+      id: suspect.id || `s${index + 1}`,
+      imageUrl: getPlaceholderImage(suspect.name),
+    })),
+    evidence: (caseContent.evidence || []).map((item: any, index: number) => ({
+      ...item,
+      id: item.id || `e${index + 1}`,
+    })),
+    timeline: caseContent.timeline || [],
+    truth: caseContent.truth,
+    redHerrings: caseContent.redHerrings || [],
+    createdAt: Date.now(),
+  };
+}
+
+async function buildCaseDataWithImages(difficulty: string, caseContent: any): Promise<CaseData> {
+  let sceneImageUrl = '';
+  let victimImageUrl = '';
+  let suspectImageUrls: string[] = [];
+
+  if (shouldGenerateImages()) {
+    console.log('[API] Case content generated, generating images in parallel...');
+
+    const scenePrompt = buildScenePrompt(
+      caseContent.setting,
+      caseContent.deathMethod,
+      caseContent.sceneDescription
+    );
+    const victimPrompt = buildPortraitPrompt(
+      caseContent.victim.name,
+      caseContent.victim.gender,
+      caseContent.victim.age,
+      caseContent.victim.occupation,
+      'victim'
+    );
+    const suspectPrompts = caseContent.suspects.map((suspect: any) =>
+      buildPortraitPrompt(
+        suspect.name,
+        suspect.gender,
+        suspect.age,
+        suspect.occupation,
+        suspect.personality
+      )
+    );
+
+    [sceneImageUrl, victimImageUrl, ...suspectImageUrls] = await Promise.all([
+      generateImage(scenePrompt),
+      generateImage(victimPrompt),
+      ...suspectPrompts.map((prompt: string) => generateImage(prompt)),
+    ]);
+  } else {
+    console.log('[API] Skipping AI image generation (serverless mode, using placeholders)');
+  }
+
+  const caseData = buildCaseData(difficulty, caseContent);
+  caseData.victim.imageUrl = victimImageUrl || caseData.victim.imageUrl;
+  caseData.sceneImageUrl = sceneImageUrl || caseData.sceneImageUrl;
+  caseData.suspects = caseData.suspects.map((suspect, index) => ({
+    ...suspect,
+    imageUrl: suspectImageUrls[index] || suspect.imageUrl,
+  }));
+  return caseData;
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const { difficulty } = await request.json();
+    const body = await request.json();
+    const { difficulty, phase, core } = body;
 
-    console.log('[API] Starting case generation, difficulty:', difficulty);
+    console.log('[API] Case generation request:', { difficulty, phase, serverless: isServerlessEnv() });
 
-    const caseContent = await generateCaseWithRetry(difficulty);
-
-    let sceneImageUrl = '';
-    let victimImageUrl = '';
-    let suspectImageUrls: string[] = [];
-
-    if (shouldGenerateImages()) {
-      console.log('[API] Case content generated, generating images in parallel...');
-
-      const scenePrompt = buildScenePrompt(
-        caseContent.setting,
-        caseContent.deathMethod,
-        caseContent.sceneDescription
+    if (phase === 'base') {
+      const caseBase = await generateCaseWithRetry('Case base', () =>
+        generateCaseBaseWithAI(difficulty)
       );
-      const victimPrompt = buildPortraitPrompt(
-        caseContent.victim.name,
-        caseContent.victim.gender,
-        caseContent.victim.age,
-        caseContent.victim.occupation,
-        'victim'
-      );
-      const suspectPrompts = caseContent.suspects.map((suspect: any) =>
-        buildPortraitPrompt(
-          suspect.name,
-          suspect.gender,
-          suspect.age,
-          suspect.occupation,
-          suspect.personality
-        )
-      );
-
-      [sceneImageUrl, victimImageUrl, ...suspectImageUrls] = await Promise.all([
-        generateImage(scenePrompt),
-        generateImage(victimPrompt),
-        ...suspectPrompts.map((prompt: string) => generateImage(prompt)),
-      ]);
-    } else {
-      console.log('[API] Skipping AI image generation (serverless mode, using placeholders)');
+      return NextResponse.json({ success: true, phase: 'base', caseBase });
     }
 
-    const caseData: CaseData = {
-      id: generateId(),
-      title: caseContent.title,
-      difficulty,
-      setting: caseContent.setting,
-      victim: {
-        ...caseContent.victim,
-        imageUrl: victimImageUrl || getPlaceholderImage(caseContent.victim.name),
-      },
-      deathMethod: caseContent.deathMethod,
-      sceneDescription: caseContent.sceneDescription,
-      sceneImageUrl: sceneImageUrl || getPlaceholderImage('Crime Scene'),
-      suspects: caseContent.suspects.map((suspect: any, index: number) => ({
-        ...suspect,
-        id: suspect.id || `s${index + 1}`,
-        imageUrl: suspectImageUrls[index] || getPlaceholderImage(suspect.name),
-      })),
-      evidence: (caseContent.evidence || []).map((item: any, index: number) => ({
-        ...item,
-        id: item.id || `e${index + 1}`,
-      })),
-      timeline: caseContent.timeline,
-      truth: caseContent.truth,
-      redHerrings: caseContent.redHerrings,
-      createdAt: Date.now(),
-    };
+    if (phase === 'cast') {
+      if (!core?.title || !core?.victim) {
+        return NextResponse.json({ success: false, error: '缺少案件基础数据' }, { status: 400 });
+      }
+      const caseCast = await generateCaseWithRetry('Case cast', () =>
+        generateCaseCastWithAI(difficulty, core)
+      );
+      return NextResponse.json({ success: true, phase: 'cast', caseCast });
+    }
+
+    if (phase === 'core') {
+      const caseCore = await generateCaseWithRetry('Case core', () =>
+        generateCaseCoreWithAI(difficulty)
+      );
+      return NextResponse.json({ success: true, phase: 'core', caseCore });
+    }
+
+    if (phase === 'details') {
+      if (!core?.title || !core?.suspects || !core?.truth) {
+        return NextResponse.json({ success: false, error: '缺少案件核心数据' }, { status: 400 });
+      }
+      const details = await generateCaseWithRetry('Case details', () =>
+        generateCaseDetailsWithAI(difficulty, core)
+      );
+      const caseData = await buildCaseDataWithImages(difficulty, { ...core, ...details });
+      console.log('[API] Case data created successfully (phased), id:', caseData.id);
+      return NextResponse.json({ success: true, caseId: caseData.id, caseData });
+    }
+
+    if (isServerlessEnv()) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: '请使用分步生成（phase: core 然后 details）',
+        },
+        { status: 400 }
+      );
+    }
+
+    const caseContent = await generateCaseWithRetry('Case generation', () =>
+      generateCaseWithAI(difficulty)
+    );
+    const caseData = await buildCaseDataWithImages(difficulty, caseContent);
 
     console.log('[API] Case data created successfully, id:', caseData.id);
 
@@ -160,6 +235,21 @@ export async function POST(request: NextRequest) {
             'API 密钥无效。请在 .env.local 配置 SILICONFLOW_API_KEY（从 https://cloud.siliconflow.cn 获取）',
         },
         { status: 401 }
+      );
+    }
+
+    const isTimeout =
+      error.message?.includes('timed out') ||
+      error.message?.includes('timeout') ||
+      error.code === 'ECONNABORTED';
+
+    if (isTimeout) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'AI 生成超时（Netlify 单次请求上限约 26 秒），请重试',
+        },
+        { status: 504 }
       );
     }
 
