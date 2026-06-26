@@ -17,7 +17,7 @@ if (configError) {
 const client = new OpenAI({
   apiKey: AI_CONFIG.apiKey,
   baseURL: AI_CONFIG.baseURL,
-  timeout: isServerlessEnv() ? 26000 : 55000,
+  timeout: isServerlessEnv() ? 120000 : 55000,
   maxRetries: 0,
 });
 

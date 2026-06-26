@@ -1,45 +1,41 @@
 import { NextRequest, NextResponse } from 'next/server';
-import {
-  generateCaseBaseWithAI,
-  generateCaseCastWithAI,
-  generateCaseCoreWithAI,
-  generateCaseDetailsWithAI,
-  generateCaseWithAI,
-  generateImage,
-} from '@/lib/ai';
+import { generateCaseWithAI } from '@/lib/ai';
+import { buildCaseDataWithImages } from '@/lib/case-assembler';
+import { setCaseJob } from '@/lib/case-job-store';
+import { buildCaseFromPhases } from '@/lib/generate-case-orchestrator';
 import {
   getCaseGenerationMaxRetries,
   getCaseGenerationTimeoutMs,
   isServerlessEnv,
-  shouldGenerateImages,
 } from '@/lib/ai-config';
 import { generateId } from '@/lib/utils';
 import { CaseData } from '@/lib/types';
 
 export const maxDuration = 60;
 
-function getPlaceholderImage(name: string) {
-  const encodedName = encodeURIComponent(name);
-  return `https://ui-avatars.com/api/?name=${encodedName}&size=512&background=8b0000&color=fff&bold=true`;
+function getSiteUrl() {
+  return (
+    process.env.URL ||
+    process.env.DEPLOY_PRIME_URL ||
+    process.env.DEPLOY_URL ||
+    'https://mystery-game-ultimate.netlify.app'
+  );
 }
 
-function buildScenePrompt(setting: string, deathMethod: string, description: string) {
-  return `Cinematic noir mystery crime scene photograph, ${setting}, ${deathMethod}, dark atmospheric lighting, dramatic shadows, realistic, moody detective story, no text, no watermark. ${description.slice(0, 120)}`;
-}
+async function triggerBackgroundJob(jobId: string, difficulty: string) {
+  const bgUrl = `${getSiteUrl()}/.netlify/functions/generate-case-background`;
+  console.log('[API] Triggering background function:', bgUrl);
 
-function normalizeGender(gender?: string) {
-  return gender === 'female' ? 'female' : 'male';
-}
+  const response = await fetch(bgUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jobId, difficulty }),
+  });
 
-function buildPortraitPrompt(
-  name: string,
-  gender: string | undefined,
-  age: number,
-  occupation: string,
-  personality: string
-) {
-  const normalizedGender = normalizeGender(gender);
-  return `Realistic portrait photo of a Chinese ${normalizedGender} adult, name ${name}, age ${age}, occupation ${occupation}, personality ${personality}. Keep the face, hairstyle, clothing, and body traits clearly ${normalizedGender}. Dark mystery thriller aesthetic, dramatic side lighting, serious expression, realistic skin texture, no text, no watermark, not androgynous.`;
+  if (!response.ok && response.status !== 202) {
+    const text = await response.text().catch(() => '');
+    throw new Error(`Background function trigger failed: ${response.status} ${text}`);
+  }
 }
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
@@ -79,133 +75,29 @@ async function generateCaseWithRetry<T>(label: string, fn: () => Promise<T>): Pr
   throw lastError ?? new Error(`${label} failed`);
 }
 
-function buildCaseData(difficulty: string, caseContent: any): CaseData {
-  return {
-    id: generateId(),
-    title: caseContent.title,
-    difficulty: difficulty as CaseData['difficulty'],
-    setting: caseContent.setting,
-    victim: {
-      ...caseContent.victim,
-      imageUrl: getPlaceholderImage(caseContent.victim.name),
-    },
-    deathMethod: caseContent.deathMethod,
-    sceneDescription: caseContent.sceneDescription,
-    sceneImageUrl: getPlaceholderImage('Crime Scene'),
-    suspects: caseContent.suspects.map((suspect: any, index: number) => ({
-      ...suspect,
-      id: suspect.id || `s${index + 1}`,
-      imageUrl: getPlaceholderImage(suspect.name),
-    })),
-    evidence: (caseContent.evidence || []).map((item: any, index: number) => ({
-      ...item,
-      id: item.id || `e${index + 1}`,
-    })),
-    timeline: caseContent.timeline || [],
-    truth: caseContent.truth,
-    redHerrings: caseContent.redHerrings || [],
-    createdAt: Date.now(),
-  };
-}
-
-async function buildCaseDataWithImages(difficulty: string, caseContent: any): Promise<CaseData> {
-  let sceneImageUrl = '';
-  let victimImageUrl = '';
-  let suspectImageUrls: string[] = [];
-
-  if (shouldGenerateImages()) {
-    console.log('[API] Case content generated, generating images in parallel...');
-
-    const scenePrompt = buildScenePrompt(
-      caseContent.setting,
-      caseContent.deathMethod,
-      caseContent.sceneDescription
-    );
-    const victimPrompt = buildPortraitPrompt(
-      caseContent.victim.name,
-      caseContent.victim.gender,
-      caseContent.victim.age,
-      caseContent.victim.occupation,
-      'victim'
-    );
-    const suspectPrompts = caseContent.suspects.map((suspect: any) =>
-      buildPortraitPrompt(
-        suspect.name,
-        suspect.gender,
-        suspect.age,
-        suspect.occupation,
-        suspect.personality
-      )
-    );
-
-    [sceneImageUrl, victimImageUrl, ...suspectImageUrls] = await Promise.all([
-      generateImage(scenePrompt),
-      generateImage(victimPrompt),
-      ...suspectPrompts.map((prompt: string) => generateImage(prompt)),
-    ]);
-  } else {
-    console.log('[API] Skipping AI image generation (serverless mode, using placeholders)');
-  }
-
-  const caseData = buildCaseData(difficulty, caseContent);
-  caseData.victim.imageUrl = victimImageUrl || caseData.victim.imageUrl;
-  caseData.sceneImageUrl = sceneImageUrl || caseData.sceneImageUrl;
-  caseData.suspects = caseData.suspects.map((suspect, index) => ({
-    ...suspect,
-    imageUrl: suspectImageUrls[index] || suspect.imageUrl,
-  }));
-  return caseData;
-}
-
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { difficulty, phase, core } = body;
+    const { difficulty, phase } = body;
 
     console.log('[API] Case generation request:', { difficulty, phase, serverless: isServerlessEnv() });
 
-    if (phase === 'base') {
-      const caseBase = await generateCaseWithRetry('Case base', () =>
-        generateCaseBaseWithAI(difficulty)
-      );
-      return NextResponse.json({ success: true, phase: 'base', caseBase });
-    }
+    if (phase === 'start') {
+      const jobId = generateId();
+      await setCaseJob(jobId, { status: 'pending', createdAt: Date.now() });
 
-    if (phase === 'cast') {
-      if (!core?.title || !core?.victim) {
-        return NextResponse.json({ success: false, error: '缺少案件基础数据' }, { status: 400 });
+      if (isServerlessEnv()) {
+        await triggerBackgroundJob(jobId, difficulty);
+        return NextResponse.json({ success: true, jobId, async: true });
       }
-      const caseCast = await generateCaseWithRetry('Case cast', () =>
-        generateCaseCastWithAI(difficulty, core)
-      );
-      return NextResponse.json({ success: true, phase: 'cast', caseCast });
-    }
 
-    if (phase === 'core') {
-      const caseCore = await generateCaseWithRetry('Case core', () =>
-        generateCaseCoreWithAI(difficulty)
-      );
-      return NextResponse.json({ success: true, phase: 'core', caseCore });
-    }
-
-    if (phase === 'details') {
-      if (!core?.title || !core?.suspects || !core?.truth) {
-        return NextResponse.json({ success: false, error: '缺少案件核心数据' }, { status: 400 });
-      }
-      const details = await generateCaseWithRetry('Case details', () =>
-        generateCaseDetailsWithAI(difficulty, core)
-      );
-      const caseData = await buildCaseDataWithImages(difficulty, { ...core, ...details });
-      console.log('[API] Case data created successfully (phased), id:', caseData.id);
-      return NextResponse.json({ success: true, caseId: caseData.id, caseData });
+      const caseData = await buildCaseFromPhases(difficulty);
+      return NextResponse.json({ success: true, sync: true, caseId: caseData.id, caseData });
     }
 
     if (isServerlessEnv()) {
       return NextResponse.json(
-        {
-          success: false,
-          error: '请使用分步生成（phase: core 然后 details）',
-        },
+        { success: false, error: '请使用 phase: start 启动异步生成' },
         { status: 400 }
       );
     }
@@ -247,7 +139,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           success: false,
-          error: 'AI 生成超时（Netlify 单次请求上限约 26 秒），请重试',
+          error: 'AI 生成超时，请重试',
         },
         { status: 504 }
       );

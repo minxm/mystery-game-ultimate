@@ -13,6 +13,7 @@
 
 # 函数配置
 [functions]
+  directory = "netlify/functions"
   node_bundler = "esbuild"
 
 [functions."___netlify-server-handler"]

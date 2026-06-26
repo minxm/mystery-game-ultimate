@@ -12,98 +12,66 @@ export default function HomePage() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatingStatus, setGeneratingStatus] = useState('');
 
-  async function postCasePhase(
-    body: Record<string, unknown>,
-    requestTimeoutMs = 28000
-  ) {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), requestTimeoutMs);
+  function sleep(ms: number) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
 
-    try {
-      const response = await fetch('/api/generate-case', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      });
+  async function pollCaseJob(jobId: string, maxWaitMs = 180000): Promise<any> {
+    const startedAt = Date.now();
+    let dots = 0;
 
+    while (Date.now() - startedAt < maxWaitMs) {
+      dots = (dots + 1) % 4;
+      setGeneratingStatus(`AI 正在生成案件${'.'.repeat(dots + 1)}`);
+
+      const response = await fetch(`/api/generate-case/status?jobId=${encodeURIComponent(jobId)}`);
       const data = await response.json().catch(() => ({}));
 
-      if (!response.ok) {
-        const msg =
-          response.status === 401
-            ? data.error || 'API 密钥未配置或无效，请在 Netlify 环境变量中设置 SILICONFLOW_API_KEY'
-            : response.status === 502 || response.status === 504
-              ? data.error || '服务器处理超时，请稍后重试'
-              : data.error || `HTTP error! status: ${response.status}`;
-        throw new Error(msg);
+      if (response.ok && data.status === 'done' && data.caseData) {
+        return data.caseData;
+      }
+      if (data.status === 'error') {
+        throw new Error(data.error || '案件生成失败');
       }
 
-      return data;
-    } finally {
-      clearTimeout(timeoutId);
+      await sleep(2000);
     }
+
+    throw new Error('生成超时，请稍后重试');
   }
 
   const handleStartCase = async () => {
     setIsGenerating(true);
-    setGeneratingStatus('正在构思案件框架…');
+    setGeneratingStatus('正在提交生成任务…');
     try {
-      console.log('[Frontend] Starting phased case generation...');
-
-      const baseData = await postCasePhase({
-        difficulty: selectedDifficulty,
-        phase: 'base',
-      });
-      if (!baseData.success || !baseData.caseBase) {
-        throw new Error(baseData.error || '案件基础信息生成失败');
-      }
-
-      setGeneratingStatus('正在塑造嫌疑人与真相…');
-
-      const castData = await postCasePhase({
-        difficulty: selectedDifficulty,
-        phase: 'cast',
-        core: baseData.caseBase,
-      });
-      if (!castData.success || !castData.caseCast) {
-        throw new Error(castData.error || '嫌疑人与真相生成失败');
-      }
-
-      const caseCore = { ...baseData.caseBase, ...castData.caseCast };
-
-      setGeneratingStatus('正在补充线索与时间线…');
-
-      const detailsData = await postCasePhase({
-        difficulty: selectedDifficulty,
-        phase: 'details',
-        core: caseCore,
+      const response = await fetch('/api/generate-case', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ difficulty: selectedDifficulty, phase: 'start' }),
       });
 
-      console.log('[Frontend] Response data:', {
-        success: detailsData.success,
-        isFallback: detailsData.isFallback,
-        hasCaseId: !!detailsData.caseId,
-        hasCaseData: !!detailsData.caseData,
-      });
+      const startData = await response.json().catch(() => ({}));
 
-      if (detailsData.isFallback) {
-        throw new Error(detailsData.error || 'AI 生成失败，请检查 SILICONFLOW_API_KEY 配置后重试');
+      if (!response.ok) {
+        throw new Error(startData.error || `HTTP error! status: ${response.status}`);
       }
 
-      if (detailsData.success && detailsData.caseId && detailsData.caseData) {
-        sessionStorage.setItem('currentCase', JSON.stringify(detailsData.caseData));
-        router.push(`/case/${detailsData.caseId}`);
-      } else {
-        throw new Error(detailsData.error || '生成案件失败：数据格式错误');
+      if (startData.sync && startData.caseData) {
+        sessionStorage.setItem('currentCase', JSON.stringify(startData.caseData));
+        router.push(`/case/${startData.caseId}`);
+        return;
       }
+
+      if (!startData.jobId) {
+        throw new Error('未收到任务 ID');
+      }
+
+      const caseData = await pollCaseJob(startData.jobId);
+      sessionStorage.setItem('currentCase', JSON.stringify(caseData));
+      router.push(`/case/${caseData.id}`);
     } catch (error: any) {
       console.error('[Frontend] Case generation failed:', error);
-      const message =
-        error.name === 'AbortError'
-          ? '单步生成超时，请稍后重试'
-          : error.message || '请重试';
-      alert(`生成案件失败：${message}`);
+      alert(`生成案件失败：${error.message || '请重试'}`);
     } finally {
       setIsGenerating(false);
       setGeneratingStatus('');
@@ -238,7 +206,7 @@ export default function HomePage() {
               )}
             </motion.button>
             <p className="mt-4 text-xs md:text-sm text-gray-500">
-              分三步生成，每步约 10–20 秒，请耐心等待
+              提交后 AI 在后台生成，约 30–90 秒，请保持页面打开
             </p>
           </motion.div>
         </motion.div>
