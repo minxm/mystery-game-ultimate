@@ -85,40 +85,64 @@ function buildServerlessCasePrompt(difficulty: string, theme?: string) {
 要求：逻辑闭环，真凶仅1人，只返回JSON。`;
 }
 
-const BASE_THEMES = [
-  { era: '民国时期', location: '租界洋楼内的私人宴会', motif: '家族秘辛与政治暗流' },
-  { era: '当代', location: '孤悬海外的豪华游轮', motif: '巨额遗产争夺' },
-  { era: '当代', location: '山顶封闭式精英学院', motif: '学术竞争与秘密社团' },
-  { era: '现代', location: '深山古镇里的百年老宅', motif: '家族诅咒与隐秘复仇' },
-  { era: '当代', location: '顶级艺术拍卖行的私藏展厅', motif: '赝品与黑市交易' },
-  { era: '现代', location: '荒岛度假别墅', motif: '与外界失联的封闭密室' },
-  { era: '当代', location: '顶层豪华私人会所', motif: '商业阴谋与权贵博弈' },
-  { era: '现代', location: '废弃制药厂改建的艺术空间', motif: '实验伦理与黑色研究' },
-  { era: '民国', location: '西湖边的茶馆与烟花里弄', motif: '谍报交锋与情仇纠葛' },
-  { era: '当代', location: '高铁专属包厢内', motif: '短途旅途中的完美不在场证明' },
+// 多个独立维度各自随机选取，组合数 = 各维度数量之积（可达数十万），
+// 加上 AI 自身创造性，实际案件几乎不会重复。
+const ERAS = [
+  '民国时期', '清末民初', '二十世纪七十年代', '当代都市', '近未来科技社会',
+  '架空古代', '八十年代改革浪潮中', '九十年代香港回归前夕', '当代小城镇', '抗战时期后方',
+];
+const LOCATIONS = [
+  '孤悬海外的豪华游轮', '封闭式山顶精英学院', '荒岛度假别墅',
+  '高档私人会所顶层', '百年家族老宅', '跨国艺术品拍卖行后台',
+  '高铁私人包厢', '星级温泉酒店', '废弃工厂改建的艺术空间',
+  '深山禅修道场', '南极科考站', '孤立山区小镇', '地下赌场隐秘包间',
+  '豪华私人飞机机舱', '著名大学图书馆密室', '租界时代的洋楼',
+  '古镇戏班后台', '顶级医疗美容机构', '高档游艇俱乐部码头', '军事要地废弃营房',
+];
+const MOTIFS = [
+  '巨额遗产争夺', '商业机密泄露', '隐秘复仇计划', '学术造假与利益链',
+  '黑市文物交易', '政治献金丑闻', '伪造身份与过去的秘密',
+  '多角情感纠葛', '医学伦理违规', '宗教极端组织渗透',
+  '家族诅咒与祖传秘密', '谍报交锋与双面间谍', '高利贷与地下钱庄',
+  '网络诈骗与数字证据', '演艺圈潜规则与权力游戏',
+];
+const DEATH_METHODS = [
+  '剧毒下药', '机关陷阱致死', '伪造意外溺水', '高空坠落伪装跌落',
+  '钝器袭击后移尸', '药物过量伪装自杀', '勒颈窒息', '放火焚烧毁证',
+  '电击伪装触电事故', '过敏原投毒', '一氧化碳中毒伪装取暖事故',
+  '枪伤伪装自卫', '锐器刺伤后二次移尸制造密室',
+];
+const VICTIM_ROLES = [
+  '私家侦探', '前任政界人士', '顶级厨师', '著名作家', '古董鉴定师',
+  '医学研究员', '金融操盘手', '退役特工', '娱乐圈经纪人', '慈善基金会会长',
+  '黑帮洗白的企业家', '遗产律师', '知名博主', '大学院长', '航运公司老板',
 ];
 
-const DEATH_METHODS = [
-  '剧毒下药', '机关陷阱', '伪造意外溺水', '高空坠落', '钝器袭击',
-  '药物过量伪装自杀', '勒颈窒息', '放火焚烧', '电击伪装触电事故',
-];
+function pick<T>(arr: T[]): T {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
 
 function buildCaseBasePrompt(difficulty: string) {
-  const theme = BASE_THEMES[Math.floor(Math.random() * BASE_THEMES.length)];
-  const deathHint = DEATH_METHODS[Math.floor(Math.random() * DEATH_METHODS.length)];
-  return `你是悬疑推理编剧，请基于以下随机主题生成一个全新的剧本杀案件基础设定，难度${difficulty}。
+  const era = pick(ERAS);
+  const location = pick(LOCATIONS);
+  const motif = pick(MOTIFS);
+  const deathHint = pick(DEATH_METHODS);
+  const victimRole = pick(VICTIM_ROLES);
+  // 将多个维度注入 prompt，使每次生成的创作种子几乎独一无二
+  return `你是顶级悬疑推理编剧。请生成一个剧本杀案件的基础设定，难度${difficulty}。
 
-主题方向（必须以此为核心，不得偏离）：
-- 时代背景：${theme.era}
-- 案发地点类型：${theme.location}
-- 核心矛盾：${theme.motif}
-- 参考死亡方式：${deathHint}（可据情节调整）
+【本次随机创作参数，必须严格遵照，不得替换】
+- 时代背景：${era}
+- 案发地点：${location}
+- 核心矛盾：${motif}
+- 死亡方式参考：${deathHint}（可微调，但不得换成完全不同类型）
+- 受害者职业参考：${victimRole}（可微调，保持职业大类）
 
-命名要求：使用有特色的中文名（取自自然意象、诗词、历史典故，如"凌霜月""方若水""沈云霄"等风格），严禁张三李四。
+【命名要求】使用个性鲜明的中文名，风格参考：凌霜月、方若水、沈云霄、祁凌霜、程烟雨。严禁张三李四王五。
 
-按以下 JSON 结构输出（字段内容完全原创，不得照抄任何示例）：
-{"title":"【原创案件标题】","setting":"【具体案发场所描述】","victim":{"name":"【受害者名】","gender":"male或female","age":数字,"occupation":"【职业】","background":"【50字内背景，含隐秘动机】"},"deathMethod":"【死亡方式】","sceneDescription":"【150字内现场描述，细节生动】"}
-只输出 JSON。`;
+【输出格式】严格按以下 JSON 结构，所有字段内容必须完全原创，不得照抄或套用任何已有示例：
+{"title":"（原创标题，含地名或意象，5-10字）","setting":"（具体场所，含环境细节）","victim":{"name":"（原创名字）","gender":"male或female","age":（数字）,"occupation":"（职业）","background":"（50字内，含一个隐秘的把柄或秘密）"},"deathMethod":"（死亡方式）","sceneDescription":"（150字内生动现场描述，包含至少一处异常细节）"}
+只输出 JSON，不要任何解释或 markdown。`;
 }
 
 function buildCaseCastPrompt(difficulty: string, base: Record<string, unknown>) {
