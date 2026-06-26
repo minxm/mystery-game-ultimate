@@ -1,4 +1,4 @@
-import type { Handler } from '@netlify/functions';
+import type { Config } from '@netlify/functions';
 import { buildCaseFromPhases } from '../../lib/generate-case-orchestrator';
 import { setCaseJob } from '../../lib/case-job-store';
 
@@ -18,12 +18,14 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
   });
 }
 
-export const handler: Handler = async (event) => {
-  const { jobId, difficulty } = JSON.parse(event.body || '{}');
+// v2 语法：default export + Request 参数，Blobs 在运行时自动注入，无需手动配置
+export default async (req: Request) => {
+  const body = await req.json().catch(() => ({}));
+  const { jobId, difficulty } = body as { jobId?: string; difficulty?: string };
 
   if (!jobId || !difficulty) {
     console.error('[Background] Missing jobId or difficulty');
-    return { statusCode: 400, body: 'Missing jobId or difficulty' };
+    return;
   }
 
   console.log('[Background] Starting case generation for job:', jobId, 'difficulty:', difficulty);
@@ -52,10 +54,9 @@ export const handler: Handler = async (event) => {
       console.error('[Background] Failed to update job status:', storeError.message);
     }
   }
-
-  return { statusCode: 200, body: JSON.stringify({ ok: true }) };
 };
 
-export const config = {
-  type: 'experimental-background' as const,
+// v2 background function：客户端立即收到 202，函数在后台继续执行
+export const config: Config = {
+  background: true,
 };

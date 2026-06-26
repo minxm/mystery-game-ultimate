@@ -8,6 +8,7 @@ import {
   isServerlessEnv,
 } from '@/lib/ai-config';
 import { generateId } from '@/lib/utils';
+import { setCaseJob } from '@/lib/case-job-store';
 import { CaseData } from '@/lib/types';
 
 export const maxDuration = 60;
@@ -58,14 +59,34 @@ export async function POST(request: NextRequest) {
 
     if (phase === 'start') {
       if (isServerlessEnv()) {
-        // Serverless 环境（Netlify 等）：单次 AI 调用，在 60s 函数时限内完成
-        // 注意：background function 需要 Functions v2 才能访问 Netlify Blobs，
-        //       为避免 MissingBlobsEnvironmentError，改用同步生成
-        const caseContent = await generateCaseWithRetry('Serverless case generation', () =>
-          generateCaseWithAI(difficulty)
-        );
-        const caseData = await buildCaseDataWithImages(difficulty, caseContent);
-        return NextResponse.json({ success: true, sync: true, caseId: caseData.id, caseData });
+        // Serverless 环境（Netlify）：同步函数受 ~26s 网关硬超时限制，
+        // 72B 大模型 + 跨境调用国内 API 经常超时回退默认案件。
+        // 改为异步：创建 pending 任务 → 触发可运行 15 分钟的后台函数 → 前端轮询 /status。
+        const jobId = generateId();
+        await setCaseJob(jobId, { status: 'pending', createdAt: Date.now() });
+
+        const origin = request.nextUrl.origin;
+        const triggerRes = await fetch(
+          `${origin}/.netlify/functions/generate-case-background`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jobId, difficulty }),
+          }
+        ).catch((e: any) => {
+          console.error('[API] Trigger background function failed:', e?.message);
+          return null;
+        });
+
+        // 后台函数正常会立即返回 202 Accepted
+        if (!triggerRes || (triggerRes.status !== 202 && !triggerRes.ok)) {
+          throw new Error(
+            `后台生成任务触发失败${triggerRes ? `（HTTP ${triggerRes.status}）` : ''}`
+          );
+        }
+
+        console.log('[API] Background job triggered:', jobId);
+        return NextResponse.json({ success: true, jobId });
       }
 
       // 本地开发：多阶段生成，55s 总超时（3阶段×~15s，留余量；单次 AI 调用上限 40s）

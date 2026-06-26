@@ -8,7 +8,6 @@
 [build.environment]
   NODE_VERSION = "18"
   AI_GENERATE_IMAGES = "false"
-  AI_TEXT_MODEL = "Qwen/Qwen2.5-7B-Instruct"
   NETLIFY = "true"
 
 # 函数配置
