@@ -1,6 +1,7 @@
 import type { Config } from '@netlify/functions';
 import { buildCaseFromPhases } from '../../lib/generate-case-orchestrator';
 import { setCaseJob } from '../../lib/case-job-store';
+import { createFallbackCase } from '../../lib/fallback-case';
 
 // Netlify background functions 最长运行 15 分钟，给 AI 生成留 5 分钟余量
 const GENERATION_TIMEOUT_MS = 5 * 60 * 1000;
@@ -43,15 +44,28 @@ export default async (req: Request) => {
     });
     console.log('[Background] Job completed:', jobId, caseData.title);
   } catch (error: any) {
-    console.error('[Background] Job failed:', jobId, error.message);
+    // AI 生成失败/超时时，不再让前端看到「生成失败」，而是回退到一个完整可玩的兜底案件，
+    // 保证线上稳定：用户永远能拿到案件，最多是默认案件而非空白报错。
+    console.error('[Background] Generation failed, using fallback:', jobId, error.message);
     try {
+      const fallbackCase = createFallbackCase(difficulty);
       await setCaseJob(jobId, {
-        status: 'error',
-        error: error.message || '案件生成失败',
+        status: 'done',
+        caseData: fallbackCase,
         createdAt: Date.now(),
       });
+      console.log('[Background] Fallback case served for job:', jobId, fallbackCase.title);
     } catch (storeError: any) {
-      console.error('[Background] Failed to update job status:', storeError.message);
+      console.error('[Background] Failed to store fallback case:', storeError.message);
+      try {
+        await setCaseJob(jobId, {
+          status: 'error',
+          error: error.message || '案件生成失败',
+          createdAt: Date.now(),
+        });
+      } catch (finalErr: any) {
+        console.error('[Background] Failed to update job status:', finalErr.message);
+      }
     }
   }
 };

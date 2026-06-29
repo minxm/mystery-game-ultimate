@@ -1,5 +1,10 @@
 import OpenAI from 'openai';
 import { AI_CONFIG, getAiConfigError, isServerlessEnv } from './ai-config';
+import {
+  validateCaseBase,
+  validateCaseCast,
+  validateCaseDetails,
+} from './case-schema';
 import { getScoreRating } from './utils';
 
 const configError = getAiConfigError();
@@ -216,8 +221,8 @@ async function callCaseJson(prompt: string, maxTokens: number) {
 
 export async function generateCaseBaseWithAI(difficulty: string): Promise<any> {
   console.log('[AI] Generating case base...');
-  // 中文每字约 1 token；title+setting+victim+deathMethod+sceneDescription 约 400-800 tokens
-  return callCaseJson(buildCaseBasePrompt(difficulty), 1500);
+  const raw = await callCaseJson(buildCaseBasePrompt(difficulty), 1500);
+  return validateCaseBase(raw);
 }
 
 export async function generateCaseCastWithAI(
@@ -225,8 +230,8 @@ export async function generateCaseCastWithAI(
   base: Record<string, unknown>
 ): Promise<any> {
   console.log('[AI] Generating case cast...');
-  // 3 名嫌疑人×8个字段 + truth 对象，约 1000-2000 tokens
-  return callCaseJson(buildCaseCastPrompt(difficulty, base), 2500);
+  const raw = await callCaseJson(buildCaseCastPrompt(difficulty, base), 3000);
+  return validateCaseCast(raw);
 }
 
 export async function generateCaseCoreWithAI(difficulty: string, theme?: string): Promise<any> {
@@ -241,8 +246,8 @@ export async function generateCaseDetailsWithAI(
   theme?: string
 ): Promise<any> {
   console.log('[AI] Generating case details...');
-  // evidence(4条) + timeline(5条) + redHerrings(2条)，约 800-1500 tokens
-  return callCaseJson(buildCaseDetailsPrompt(difficulty, core), 2000);
+  const raw = await callCaseJson(buildCaseDetailsPrompt(difficulty, core), 2000);
+  return validateCaseDetails(raw);
 }
 
 export async function generateCaseWithAI(difficulty: string, theme?: string): Promise<any> {
@@ -294,43 +299,92 @@ export async function generateCaseWithAI(difficulty: string, theme?: string): Pr
 }
 
 export async function generateImage(prompt: string): Promise<string> {
-  try {
-    assertApiKeyConfigured();
-    console.log('[AI] Generating image with prompt:', prompt.substring(0, 100));
+  return generateImageWithRetry(prompt);
+}
 
-    const response = await client.images.generate({
+/** 单张图片生成，失败自动重试，优先返回 data URI 避免 S3 签名 URL 过期 */
+export async function generateImageWithRetry(prompt: string, maxAttempts = 3): Promise<string> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const result = await generateImageOnce(prompt);
+      if (result) {
+        if (attempt > 1) {
+          console.log(`[AI] Image generated on attempt ${attempt}`);
+        }
+        return result;
+      }
+    } catch (error) {
+      lastError = error;
+      console.warn(`[AI] Image attempt ${attempt}/${maxAttempts} failed:`, (error as Error)?.message);
+    }
+    if (attempt < maxAttempts) {
+      await new Promise((r) => setTimeout(r, 800 * attempt));
+    }
+  }
+  if (lastError) {
+    console.error('[AI] Image generation failed after retries:', (lastError as Error)?.message);
+  }
+  return '';
+}
+
+async function generateImageOnce(prompt: string): Promise<string> {
+  assertApiKeyConfigured();
+  console.log('[AI] Generating image with prompt:', prompt.substring(0, 100));
+
+  let response;
+  try {
+    response = await client.images.generate({
+      model: AI_CONFIG.imageModel,
+      prompt,
+      n: 1,
+      size: '1024x1024',
+      response_format: 'b64_json',
+    });
+  } catch (error: any) {
+    // 部分模型不支持 response_format，降级为默认返回
+    console.warn('[AI] b64_json request failed, retrying without response_format:', error?.message);
+    response = await client.images.generate({
       model: AI_CONFIG.imageModel,
       prompt,
       n: 1,
       size: '1024x1024',
     });
+  }
 
-    const imageData = response.data?.[0];
-
-    if (!imageData) {
-      console.log('[AI] No image data returned');
-      return '';
-    }
-
-    if (imageData.url) {
-      console.log('[AI] Image URL generated successfully');
-      return imageData.url;
-    }
-
-    if (imageData.b64_json) {
-      const dataUrl = `data:image/png;base64,${imageData.b64_json}`;
-      console.log('[AI] Image generated as base64');
-      return dataUrl;
-    }
-
-    console.log('[AI] No valid image data found');
+  const imageData = response.data?.[0];
+  if (!imageData) {
+    console.log('[AI] No image data returned');
     return '';
-  } catch (error: any) {
-    console.error('[AI] Image generation failed:', {
-      message: error.message,
-      status: error.status,
-    });
-    return '';
+  }
+
+  // 优先 b64：嵌入案件数据，不会因 S3 临时 URL 过期而「过一阵没图」
+  if (imageData.b64_json) {
+    console.log('[AI] Image generated as base64');
+    return `data:image/png;base64,${imageData.b64_json}`;
+  }
+
+  if (imageData.url) {
+    console.log('[AI] Image URL generated, persisting to data URI...');
+    return persistRemoteImage(imageData.url);
+  }
+
+  console.log('[AI] No valid image data found');
+  return '';
+}
+
+/** 将远程图片拉取为 data URI，避免签名 URL 过期后前端加载失败 */
+async function persistRemoteImage(url: string): Promise<string> {
+  if (url.startsWith('data:')) return url;
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(45000) });
+    if (!res.ok) return url;
+    const buf = Buffer.from(await res.arrayBuffer());
+    const mime = res.headers.get('content-type')?.split(';')[0] || 'image/png';
+    return `data:${mime};base64,${buf.toString('base64')}`;
+  } catch (e) {
+    console.warn('[AI] Failed to persist remote image, using URL:', (e as Error)?.message);
+    return url;
   }
 }
 

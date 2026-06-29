@@ -5,7 +5,8 @@ import { useRouter, useParams } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { Search, Users, Clock, ArrowRight, Skull, AlertTriangle, Eye } from 'lucide-react';
 import { CaseData } from '@/lib/types';
-import { storage } from '@/lib/utils';
+import { storage, loadCaseData } from '@/lib/utils';
+import { getAvatarPlaceholder, getScenePlaceholder } from '@/lib/placeholder';
 import ParticleBackground from '@/components/ParticleBackground';
 import Image from 'next/image';
 
@@ -15,6 +16,13 @@ const DIFFICULTY_LABEL: Record<string, string> = {
   hard: '高级',
   expert: '专家',
 };
+
+// 每张档案卡的个性化配色，让列表有层次感而不死板（不做倾斜）
+const SUSPECT_ACCENTS = [
+  { tag: 'text-cyan-300', chip: 'border-cyan-400/30 text-cyan-300/90', glow: '0 18px 50px rgba(34,211,238,0.22)', hoverBorder: 'group-hover:border-cyan-400/70' },
+  { tag: 'text-violet-300', chip: 'border-violet-400/30 text-violet-300/90', glow: '0 18px 50px rgba(167,139,250,0.22)', hoverBorder: 'group-hover:border-violet-400/70' },
+  { tag: 'text-amber-300', chip: 'border-amber-400/30 text-amber-300/90', glow: '0 18px 50px rgba(251,191,36,0.20)', hoverBorder: 'group-hover:border-amber-400/70' },
+] as const;
 
 export default function CasePage() {
   const router = useRouter();
@@ -29,29 +37,32 @@ export default function CasePage() {
 
   useEffect(() => {
     const caseId = params.id as string;
-    let data = storage.getCase(caseId);
-    if (!data) {
-      const sessionData = sessionStorage.getItem('currentCase');
-      if (sessionData) {
-        data = JSON.parse(sessionData);
-        if (data) storage.saveCase(data);
+    let cancelled = false;
+
+    (async () => {
+      const data = await loadCaseData(caseId);
+      if (cancelled) return;
+
+      if (data) {
+        setCaseData(data);
+        setCaseNum(data.id.slice(-6).toUpperCase());
+        const progress = storage.getProgress(caseId);
+        if (!progress) {
+          storage.saveProgress({
+            caseId,
+            discoveredEvidence: [],
+            interrogatedSuspects: [],
+            notes: '',
+            startTime: Date.now(),
+          });
+        }
       }
-    }
-    if (data) {
-      setCaseData(data);
-      setCaseNum(data.id.slice(-6).toUpperCase());
-      const progress = storage.getProgress(caseId);
-      if (!progress) {
-        storage.saveProgress({
-          caseId,
-          discoveredEvidence: [],
-          interrogatedSuspects: [],
-          notes: '',
-          startTime: Date.now(),
-        });
-      }
-    }
-    setLoading(false);
+      setLoading(false);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [params.id]);
 
   if (loading) {
@@ -176,9 +187,10 @@ export default function CasePage() {
                     onError={() => markBroken('victim')}
                   />
                 ) : (
-                  <div className="w-full h-full bg-dark-700 flex items-center justify-center">
-                    <Skull className="w-20 h-20 text-blue-900" />
-                  </div>
+                  <div
+                    className="w-full h-full bg-cover bg-center"
+                    style={{ backgroundImage: `url("${getAvatarPlaceholder(caseData.victim.name)}")` }}
+                  />
                 )}
                 {/* 扫描覆盖层 */}
                 <div className="absolute inset-0 bg-gradient-to-t from-dark-900/60 to-transparent pointer-events-none" />
@@ -225,15 +237,27 @@ export default function CasePage() {
           </div>
 
           <div className="mt-4">
-            {caseData.sceneImageUrl && (
-              <div className="relative w-full h-64 md:h-96 rounded-xl overflow-hidden mb-6 border border-blue-500/20 shadow-[0_0_40px_rgba(30,144,255,0.15)]">
-                <Image src={caseData.sceneImageUrl} alt="案发现场" fill className="object-cover" unoptimized />
-                <div className="absolute inset-0 bg-gradient-to-t from-dark-900/50 to-transparent pointer-events-none" />
-                <div className="absolute top-3 right-3 px-2 py-1 rounded bg-dark-900/70 border border-blue-500/30 text-xs font-mono text-blue-400">
-                  SCENE #001
-                </div>
+            <div className="relative w-full h-64 md:h-96 rounded-xl overflow-hidden mb-6 border border-blue-500/20 shadow-[0_0_40px_rgba(30,144,255,0.15)]">
+              {caseData.sceneImageUrl && !brokenImages.has('scene') ? (
+                <Image
+                  src={caseData.sceneImageUrl}
+                  alt="案发现场"
+                  fill
+                  className="object-cover"
+                  unoptimized
+                  onError={() => markBroken('scene')}
+                />
+              ) : (
+                <div
+                  className="w-full h-full bg-cover bg-center"
+                  style={{ backgroundImage: `url("${getScenePlaceholder(caseData.title || caseData.setting)}")` }}
+                />
+              )}
+              <div className="absolute inset-0 bg-gradient-to-t from-dark-900/50 to-transparent pointer-events-none" />
+              <div className="absolute top-3 right-3 px-2 py-1 rounded bg-dark-900/70 border border-blue-500/30 text-xs font-mono text-blue-400">
+                SCENE #001
               </div>
-            )}
+            </div>
             <p className="text-gray-300 leading-8 text-sm md:text-base tracking-wide">
               {caseData.sceneDescription}
             </p>
@@ -255,47 +279,87 @@ export default function CasePage() {
             <div className="flex-1 h-px bg-gradient-to-r from-transparent via-blue-500/40 to-transparent" />
           </div>
 
-          <div className="grid md:grid-cols-3 gap-5">
-            {caseData.suspects.map((suspect, index) => (
-              <motion.div
-                key={suspect.id}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.6 + index * 0.1 }}
-                className="suspect-card glass rounded-xl p-5 text-center detective-border group cursor-default"
-              >
-                {/* 编号 */}
-                <div className="absolute top-3 right-3 text-xs font-mono text-blue-500/40 group-hover:text-blue-400 transition">
-                  #{String(index + 1).padStart(2, '0')}
-                </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6 md:gap-7 px-1">
+            {caseData.suspects.map((suspect, index) => {
+              const accent = SUSPECT_ACCENTS[index % SUSPECT_ACCENTS.length];
+              const genderLabel = suspect.gender === 'female' ? '女' : suspect.gender === 'male' ? '男' : '—';
+              return (
+                <motion.div
+                  key={suspect.id}
+                  initial={{ opacity: 0, y: 24 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.55 + index * 0.12, type: 'spring', stiffness: 120, damping: 14 }}
+                  whileHover={{ y: -10, scale: 1.03, transition: { type: 'spring', stiffness: 260, damping: 18 } }}
+                  className="suspect-card relative glass-dark rounded-2xl p-3 group cursor-default border border-blue-500/15"
+                  style={{ boxShadow: accent.glow }}
+                >
+                  {/* 顶部「卷宗胶带」装饰 */}
+                  <div className="absolute -top-2.5 left-1/2 -translate-x-1/2 w-16 h-5 rounded-sm bg-blue-300/15 border border-blue-200/20 backdrop-blur-sm rotate-[-3deg] shadow-sm" />
 
-                {/* 头像 */}
-                <div className="relative w-28 h-28 mx-auto mb-4 rounded-xl overflow-hidden border-2 border-blue-500/30 shadow-[0_0_20px_rgba(30,144,255,0.15)] group-hover:border-blue-400/60 transition-colors">
-                  {suspect.imageUrl && !brokenImages.has(`suspect-${index}`) ? (
-                    <Image
-                      src={suspect.imageUrl}
-                      alt={suspect.name}
-                      fill
-                      className="object-cover"
-                      unoptimized
-                      onError={() => markBroken(`suspect-${index}`)}
-                    />
-                  ) : (
-                    <div className="w-full h-full bg-dark-700 flex items-center justify-center">
-                      <Users className="w-12 h-12 text-blue-900" />
+                  {/* 档案编号印章 */}
+                  <div className={`absolute top-3 right-3 z-10 px-2 py-0.5 rounded-md bg-dark-900/70 border border-blue-500/20 text-[10px] font-mono tracking-widest ${accent.tag}`}>
+                    NO.{String(index + 1).padStart(2, '0')}
+                  </div>
+
+                  {/* 头像（证件照风格，名字压在底部） */}
+                  <div className={`relative z-[1] w-full aspect-[4/5] rounded-xl overflow-hidden border-2 border-blue-500/25 ${accent.hoverBorder} transition-colors duration-300`}>
+                    {suspect.imageUrl && !brokenImages.has(`suspect-${index}`) ? (
+                      <Image
+                        src={suspect.imageUrl}
+                        alt={suspect.name}
+                        fill
+                        className="object-cover transition-transform duration-500 group-hover:scale-110"
+                        unoptimized
+                        onError={() => markBroken(`suspect-${index}`)}
+                      />
+                    ) : (
+                      <div
+                        className="w-full h-full bg-cover bg-center transition-transform duration-500 group-hover:scale-110"
+                        style={{ backgroundImage: `url("${getAvatarPlaceholder(suspect.name)}")` }}
+                      />
+                    )}
+                    {/* 扫描格栅 + 暗角 */}
+                    <div className="absolute inset-0 bg-gradient-to-t from-dark-900 via-dark-900/30 to-transparent" />
+                    <div className="absolute inset-0 opacity-[0.07] pointer-events-none"
+                      style={{ backgroundImage: 'repeating-linear-gradient(0deg, transparent, transparent 3px, #1e90ff 3px, #1e90ff 4px)' }} />
+
+                    {/* 名字 + 状态压在照片底部 */}
+                    <div className="absolute bottom-0 left-0 right-0 p-3">
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-lg font-black text-white tracking-wide drop-shadow">{suspect.name}</h3>
+                        <span className="px-1.5 py-0.5 rounded text-[10px] bg-blue-500/15 border border-blue-400/20 text-blue-200/80 font-mono">{genderLabel}</span>
+                      </div>
+                      <p className="text-[11px] text-blue-200/60 font-mono mt-0.5">{suspect.age} 岁 · {suspect.occupation}</p>
                     </div>
-                  )}
-                  <div className="absolute inset-0 bg-gradient-to-t from-dark-900/40 to-transparent" />
-                </div>
+                  </div>
 
-                <h3 className="text-xl font-bold mb-1 text-white tracking-wide">{suspect.name}</h3>
-                <p className="text-blue-300/70 text-xs mb-1 font-mono">{suspect.age} 岁 · {suspect.occupation}</p>
-                <p className="text-gray-500 text-xs">{suspect.relationship}</p>
-
-                <div className="mt-3 h-px bg-blue-500/10 group-hover:bg-blue-500/30 transition-colors" />
-                <p className="mt-2 text-xs text-blue-500/40 group-hover:text-blue-400/60 transition font-mono tracking-wider">UNKNOWN STATUS</p>
-              </motion.div>
-            ))}
+                  {/* 关系 + 性格标签 */}
+                  <div className="relative z-[1] px-1.5 pt-3 pb-1 space-y-2">
+                    <div className="flex items-center gap-1.5 text-xs">
+                      <span className="text-blue-500/50 shrink-0">关系</span>
+                      <span className="text-gray-300 truncate">{suspect.relationship}</span>
+                    </div>
+                    {suspect.personality && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {suspect.personality
+                          .split(/[，,、\s]+/)
+                          .filter(Boolean)
+                          .slice(0, 3)
+                          .map((trait, i) => (
+                            <span key={i} className={`px-2 py-0.5 rounded-full text-[10px] border bg-dark-900/40 ${accent.chip}`}>
+                              {trait}
+                            </span>
+                          ))}
+                      </div>
+                    )}
+                    <div className="flex items-center gap-1.5 pt-1 text-[10px] font-mono tracking-wider text-blue-500/40 group-hover:text-blue-400/70 transition-colors">
+                      <Search className="w-3 h-3" />
+                      <span>待审讯 · UNKNOWN</span>
+                    </div>
+                  </div>
+                </motion.div>
+              );
+            })}
           </div>
         </motion.div>
 

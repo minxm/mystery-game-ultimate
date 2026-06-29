@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { CaseData, Evidence, Suspect } from '@/lib/types';
 import { storage, loadCaseData, getSuspectId } from '@/lib/utils';
+import { getAvatarPlaceholder } from '@/lib/placeholder';
 import ParticleBackground from '@/components/ParticleBackground';
 import Image from 'next/image';
 
@@ -36,15 +37,25 @@ export default function InvestigatePage() {
 
   useEffect(() => {
     const caseId = params.id as string;
-    const data = loadCaseData(caseId);
-    if (data) {
-      setCaseData(data);
-      const progress = storage.getProgress(caseId);
-      if (progress) {
-        setDiscoveredEvidence(progress.discoveredEvidence);
-        setInterrogatedSuspects(progress.interrogatedSuspects);
+    let cancelled = false;
+
+    (async () => {
+      const data = await loadCaseData(caseId);
+      if (cancelled) return;
+
+      if (data) {
+        setCaseData(data);
+        const progress = storage.getProgress(caseId);
+        if (progress) {
+          setDiscoveredEvidence(progress.discoveredEvidence);
+          setInterrogatedSuspects(progress.interrogatedSuspects);
+        }
       }
-    }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [params.id]);
 
   const handleDiscoverEvidence = (evidenceId: string) => {
@@ -265,9 +276,10 @@ export default function InvestigatePage() {
                           onError={() => markBroken(sid)}
                         />
                       ) : (
-                        <div className="w-full h-full bg-dark-800 flex items-center justify-center">
-                          <Users className="w-20 h-20 text-blue-900" />
-                        </div>
+                        <div
+                          className="w-full h-full bg-cover bg-center"
+                          style={{ backgroundImage: `url("${getAvatarPlaceholder(suspect.name)}")` }}
+                        />
                       )}
                       <div className="absolute inset-0 bg-gradient-to-t from-dark-900 via-dark-900/20 to-transparent" />
 

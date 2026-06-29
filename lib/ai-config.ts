@@ -70,11 +70,11 @@ export const AI_CONFIG = {
   apiKey,
   apiKeySource,
   /**
-   * 案件生成 — 用 72B 指令模型。
-   * 注意：7B/8B 小模型在生成中等长度中文 JSON 时会退化成重复乱码
-   * （finish_reason=length、JSON 解析失败、请求超时），72B 稳定可靠。
+   * 案件生成 — 免费的 GLM-4-9B（非思考型，JSON 遵循能力优于 7B，不收费）。
+   * 7B 在小模型下常漏掉 suspects 等字段；9B + 分阶段校验/重试更稳，剧情质量也更好。
+   * 对话仍用 Qwen2.5-7B（响应快）。可通过 AI_TEXT_MODEL 覆盖。
    */
-  textModel: process.env.AI_TEXT_MODEL || 'Qwen/Qwen2.5-72B-Instruct',
+  textModel: process.env.AI_TEXT_MODEL || 'THUDM/GLM-4-9B-0414',
   /**
    * 嫌疑人对话 — 用 7B 指令模型（非思考模型，响应快）。
    * 注意：Qwen3 系列是思考模型，在硅基流动上会输出大量 reasoning_content，
@@ -85,11 +85,9 @@ export const AI_CONFIG = {
   imageModel: process.env.AI_IMAGE_MODEL || 'Kwai-Kolors/Kolors',
 };
 
-/** Netlify 等 Serverless 环境默认跳过 AI 生图，避免 502 超时 */
+/** 默认开启 AI 生图；仅当显式设为 false 时关闭 */
 export function shouldGenerateImages(): boolean {
-  if (process.env.AI_GENERATE_IMAGES === 'true') return true;
-  if (process.env.AI_GENERATE_IMAGES === 'false') return false;
-  return process.env.NETLIFY !== 'true';
+  return process.env.AI_GENERATE_IMAGES !== 'false';
 }
 
 export function getAiConfigError(): string | null {

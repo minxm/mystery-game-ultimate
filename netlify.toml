@@ -7,7 +7,7 @@
 
 [build.environment]
   NODE_VERSION = "18"
-  AI_GENERATE_IMAGES = "false"
+  AI_GENERATE_IMAGES = "true"
   NETLIFY = "true"
 
 # 函数配置

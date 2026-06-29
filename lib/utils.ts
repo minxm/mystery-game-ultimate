@@ -1,42 +1,29 @@
 import { CaseData, GameProgress, InterrogationMessage, UserStats } from './types';
+import { clearCaseStore, loadCaseDataById, saveCaseData } from './case-store';
 
 const STORAGE_KEYS = {
-  CASES: 'mystery_cases',
   PROGRESS: 'mystery_progress',
   STATS: 'mystery_stats',
   INTERROGATIONS: 'mystery_interrogations',
 };
 
 export const storage = {
-  // 案件存储
-  saveCases(cases: CaseData[]): void {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(STORAGE_KEYS.CASES, JSON.stringify(cases));
-    }
+  /** @deprecated 请使用 saveCaseData（IndexedDB，支持 AI 大图） */
+  saveCase(caseData: CaseData): void {
+    void saveCaseData(caseData);
+  },
+
+  /** @deprecated 请使用 loadCaseDataById */
+  getCase(_id: string): CaseData | null {
+    return null;
   },
 
   getCases(): CaseData[] {
-    if (typeof window !== 'undefined') {
-      const data = localStorage.getItem(STORAGE_KEYS.CASES);
-      return data ? JSON.parse(data) : [];
-    }
     return [];
   },
 
-  saveCase(caseData: CaseData): void {
-    const cases = this.getCases();
-    const index = cases.findIndex(c => c.id === caseData.id);
-    if (index >= 0) {
-      cases[index] = caseData;
-    } else {
-      cases.push(caseData);
-    }
-    this.saveCases(cases);
-  },
-
-  getCase(id: string): CaseData | null {
-    const cases = this.getCases();
-    return cases.find(c => c.id === id) || null;
+  saveCases(_cases: CaseData[]): void {
+    // 案件改存 IndexedDB，不再写入 localStorage
   },
 
   // 进度存储
@@ -126,7 +113,8 @@ export const storage = {
   // 清除数据
   clearAll(): void {
     if (typeof window !== 'undefined') {
-      localStorage.removeItem(STORAGE_KEYS.CASES);
+      void clearCaseStore();
+      localStorage.removeItem('mystery_cases');
       localStorage.removeItem(STORAGE_KEYS.PROGRESS);
       localStorage.removeItem(STORAGE_KEYS.STATS);
       localStorage.removeItem(STORAGE_KEYS.INTERROGATIONS);
@@ -138,23 +126,12 @@ export function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 }
 
-/** 从 localStorage 或 sessionStorage 加载案件 */
-export function loadCaseData(caseId: string): CaseData | null {
-  let data = storage.getCase(caseId);
-
-  if (!data && typeof window !== 'undefined') {
-    const sessionData = sessionStorage.getItem('currentCase');
-    if (sessionData) {
-      const parsed = JSON.parse(sessionData) as CaseData;
-      if (parsed.id === caseId) {
-        data = parsed;
-        storage.saveCase(parsed);
-      }
-    }
-  }
-
-  return data;
+/** 从 IndexedDB 加载案件（支持含 base64 AI 图的大体积数据） */
+export async function loadCaseData(caseId: string): Promise<CaseData | null> {
+  return loadCaseDataById(caseId);
 }
+
+export { saveCaseData, loadCaseDataById } from './case-store';
 
 /** 根据 URL 参数或缓存查找嫌疑人 */
 export function findSuspectByParam(

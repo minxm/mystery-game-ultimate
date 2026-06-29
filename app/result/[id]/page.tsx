@@ -8,7 +8,7 @@ import {
   Shield, ChevronDown, ChevronUp, Sparkles, Unlock,
 } from 'lucide-react';
 import { CaseData } from '@/lib/types';
-import { storage, getScoreRating, formatTime } from '@/lib/utils';
+import { storage, getScoreRating, formatTime, loadCaseData } from '@/lib/utils';
 import ParticleBackground from '@/components/ParticleBackground';
 
 interface Evaluation {
@@ -75,13 +75,23 @@ export default function ResultPage() {
 
   useEffect(() => {
     const caseId = params.id as string;
-    const data = storage.getCase(caseId);
-    if (data) setCaseData(data);
+    let cancelled = false;
+
+    (async () => {
+      const data = await loadCaseData(caseId);
+      if (cancelled) return;
+      if (data) setCaseData(data);
+    })();
+
     const evalData = sessionStorage.getItem('evaluation');
     if (evalData) setEvaluation(JSON.parse(evalData));
     const progress = storage.getProgress(caseId);
     if (progress?.endTime) setTimeSpent(Math.floor((progress.endTime - progress.startTime) / 1000));
     setTimeout(() => setShown(true), 200);
+
+    return () => {
+      cancelled = true;
+    };
   }, [params.id]);
 
   const handleShare = () => {

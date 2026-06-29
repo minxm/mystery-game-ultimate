@@ -136,9 +136,10 @@
   border-color: rgba(30, 144, 255, 0.4);
 }
 
-/* ── 嫌疑人卡片 ── */
+/* ── 嫌疑人档案卡 ──
+   注：卡片的位移/旋转/缩放由 framer-motion 内联控制（散落卷宗 + 悬停回正），
+   这里只负责装饰性的光晕水波纹，避免和内联 transform 打架。 */
 .suspect-card {
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;
   overflow: hidden;
 }
@@ -151,20 +152,16 @@
   width: 0;
   height: 0;
   border-radius: 50%;
-  background: rgba(30, 144, 255, 0.08);
+  background: radial-gradient(circle, rgba(30, 144, 255, 0.14), transparent 70%);
   transform: translate(-50%, -50%);
-  transition: width 0.6s, height 0.6s;
+  transition: width 0.7s cubic-bezier(0.4, 0, 0.2, 1), height 0.7s cubic-bezier(0.4, 0, 0.2, 1);
   pointer-events: none;
+  z-index: 0;
 }
 
 .suspect-card:hover::after {
-  width: 300%;
-  height: 300%;
-}
-
-.suspect-card:hover {
-  transform: scale(1.05) rotateY(3deg);
-  box-shadow: 0 20px 50px rgba(30, 144, 255, 0.25);
+  width: 320%;
+  height: 320%;
 }
 
 /* ── 时间线 ── */
@@ -249,7 +246,6 @@
     backdrop-filter: blur(8px);
   }
   .card-hover:hover   { transform: scale(1.02); }
-  .suspect-card:hover { transform: scale(1.03); }
   .evidence-card:hover{ transform: translateY(-4px); }
 }
 

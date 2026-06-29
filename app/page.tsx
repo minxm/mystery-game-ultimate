@@ -5,6 +5,7 @@ import { Search, Brain, Clock, Trophy, Sparkles } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import ParticleBackground from '@/components/ParticleBackground';
+import { saveCaseData } from '@/lib/case-store';
 
 export default function HomePage() {
   const router = useRouter();
@@ -57,7 +58,7 @@ export default function HomePage() {
       }
 
       if (startData.sync && startData.caseData) {
-        sessionStorage.setItem('currentCase', JSON.stringify(startData.caseData));
+        await saveCaseData(startData.caseData);
         router.push(`/case/${startData.caseId}`);
         return;
       }
@@ -67,7 +68,7 @@ export default function HomePage() {
       }
 
       const caseData = await pollCaseJob(startData.jobId);
-      sessionStorage.setItem('currentCase', JSON.stringify(caseData));
+      await saveCaseData(caseData);
       router.push(`/case/${caseData.id}`);
     } catch (error: any) {
       console.error('[Frontend] Case generation failed:', error);

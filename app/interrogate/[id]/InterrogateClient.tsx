@@ -3,9 +3,10 @@
 import { useEffect, useState, useRef } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, Send, User, Info, X } from 'lucide-react';
+import { ArrowLeft, Send, Info, X } from 'lucide-react';
 import { CaseData, Suspect, InterrogationMessage } from '@/lib/types';
 import { storage, loadCaseData, findSuspectByParam, getSuspectId } from '@/lib/utils';
+import { getAvatarPlaceholder } from '@/lib/placeholder';
 import ParticleBackground from '@/components/ParticleBackground';
 import Image from 'next/image';
 
@@ -50,51 +51,61 @@ export default function InterrogateClient() {
     const suspectParam = resolveSuspectParam();
 
     setPageError('');
-    const data = loadCaseData(caseId);
-    if (!data) {
-      setPageError('案件数据不存在，请先重新生成案件。');
+    let cancelled = false;
+
+    (async () => {
+      const data = await loadCaseData(caseId);
+      if (cancelled) return;
+
+      if (!data) {
+        setPageError('案件数据不存在，请先重新生成案件。');
+        setIsPageLoading(false);
+        return;
+      }
+
+      setCaseData(data);
+
+      if (!suspectParam) {
+        setPageError('未指定要审问的嫌疑人。');
+        setIsPageLoading(false);
+        return;
+      }
+
+      const foundSuspect = findSuspectByParam(data.suspects, suspectParam);
+      if (!foundSuspect) {
+        setPageError(`未找到对应嫌疑人（${suspectParam}），请返回调查页重试。`);
+        setIsPageLoading(false);
+        return;
+      }
+
+      const suspectIndex = data.suspects.findIndex(
+        (s) => s === foundSuspect || s.id === foundSuspect.id || s.name === foundSuspect.name
+      );
+      const normalizedSuspect = {
+        ...foundSuspect,
+        id: getSuspectId(foundSuspect, suspectIndex >= 0 ? suspectIndex : 0),
+      };
+
+      setSuspect(normalizedSuspect);
+
+      const savedMessages = storage.getInterrogation(caseId, normalizedSuspect.id);
+      setMessages(
+        savedMessages.length > 0
+          ? savedMessages
+          : [
+              {
+                role: 'assistant',
+                content: `我是${normalizedSuspect.name}。你想问我什么？`,
+                timestamp: Date.now(),
+              },
+            ]
+      );
       setIsPageLoading(false);
-      return;
-    }
+    })();
 
-    setCaseData(data);
-
-    if (!suspectParam) {
-      setPageError('未指定要审问的嫌疑人。');
-      setIsPageLoading(false);
-      return;
-    }
-
-    const foundSuspect = findSuspectByParam(data.suspects, suspectParam);
-    if (!foundSuspect) {
-      setPageError(`未找到对应嫌疑人（${suspectParam}），请返回调查页重试。`);
-      setIsPageLoading(false);
-      return;
-    }
-
-    const suspectIndex = data.suspects.findIndex(
-      (s) => s === foundSuspect || s.id === foundSuspect.id || s.name === foundSuspect.name
-    );
-    const normalizedSuspect = {
-      ...foundSuspect,
-      id: getSuspectId(foundSuspect, suspectIndex >= 0 ? suspectIndex : 0),
+    return () => {
+      cancelled = true;
     };
-
-    setSuspect(normalizedSuspect);
-
-    const savedMessages = storage.getInterrogation(caseId, normalizedSuspect.id);
-    setMessages(
-      savedMessages.length > 0
-        ? savedMessages
-        : [
-            {
-              role: 'assistant',
-              content: `我是${normalizedSuspect.name}。你想问我什么？`,
-              timestamp: Date.now(),
-            },
-          ]
-    );
-    setIsPageLoading(false);
   }, [params.id]);
 
   const handleSendMessage = async () => {
@@ -243,9 +254,10 @@ export default function InterrogateClient() {
                   onError={() => setImgError(true)}
                 />
               ) : (
-                <div className="w-full h-full bg-dark-700 flex items-center justify-center">
-                  <User className="w-4 h-4 text-gray-500" />
-                </div>
+                <div
+                  className="w-full h-full bg-cover bg-center"
+                  style={{ backgroundImage: `url("${getAvatarPlaceholder(suspect.name)}")` }}
+                />
               )}
             </div>
 
@@ -328,9 +340,7 @@ export default function InterrogateClient() {
                   {suspect.imageUrl && !imgError ? (
                     <Image src={suspect.imageUrl} alt={suspect.name} fill className="object-cover object-top" unoptimized onError={() => setImgError(true)} />
                   ) : (
-                    <div className="w-full h-full bg-dark-700 flex items-center justify-center">
-                      <User className="w-3.5 h-3.5 text-gray-600" />
-                    </div>
+                    <div className="w-full h-full bg-cover bg-center" style={{ backgroundImage: `url("${getAvatarPlaceholder(suspect.name)}")` }} />
                   )}
                 </div>
               )}
@@ -379,9 +389,7 @@ export default function InterrogateClient() {
                 {suspect.imageUrl && !imgError ? (
                   <Image src={suspect.imageUrl} alt={suspect.name} fill className="object-cover object-top" unoptimized onError={() => setImgError(true)} />
                 ) : (
-                  <div className="w-full h-full bg-dark-700 flex items-center justify-center">
-                    <User className="w-3.5 h-3.5 text-gray-600" />
-                  </div>
+                  <div className="w-full h-full bg-cover bg-center" style={{ backgroundImage: `url("${getAvatarPlaceholder(suspect.name)}")` }} />
                 )}
               </div>
               <div

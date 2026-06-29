@@ -4,6 +4,7 @@ import {
   generateCaseDetailsWithAI,
 } from '@/lib/ai';
 import { buildCaseDataWithImages } from '@/lib/case-assembler';
+import { mergeCasePhases } from '@/lib/case-schema';
 import { getPhaseTimeoutMs } from '@/lib/ai-config';
 import { CaseData } from '@/lib/types';
 
@@ -22,17 +23,17 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: str
   }
 }
 
-/** 单个阶段失败（瞬时网络/截断/解析/超时）时重试一次，提升整体成功率 */
-async function withPhaseRetry<T>(label: string, fn: () => Promise<T>): Promise<T> {
+/** 单个阶段失败（字段缺失/截断/解析/超时）时重试，提升小模型成功率 */
+async function withPhaseRetry<T>(label: string, fn: () => Promise<T>, maxAttempts = 3): Promise<T> {
   const phaseTimeoutMs = getPhaseTimeoutMs();
   let lastError: unknown;
-  for (let attempt = 1; attempt <= 2; attempt++) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       return await withTimeout(fn(), phaseTimeoutMs, label);
     } catch (error) {
       lastError = error;
       console.warn(
-        `[Orchestrator] ${label} attempt ${attempt} failed:`,
+        `[Orchestrator] ${label} attempt ${attempt}/${maxAttempts} failed:`,
         (error as Error)?.message
       );
     }
@@ -47,11 +48,11 @@ export async function buildCaseFromPhases(difficulty: string): Promise<CaseData>
   console.log('[Orchestrator] Step 2/3: cast');
   const cast = await withPhaseRetry('cast', () => generateCaseCastWithAI(difficulty, base));
 
-  const core = { ...base, ...cast };
   console.log('[Orchestrator] Step 3/3: details');
   const details = await withPhaseRetry('details', () =>
-    generateCaseDetailsWithAI(difficulty, core)
+    generateCaseDetailsWithAI(difficulty, { ...base, ...cast })
   );
 
-  return buildCaseDataWithImages(difficulty, { ...core, ...details });
+  const merged = mergeCasePhases(base, cast, details);
+  return buildCaseDataWithImages(difficulty, merged);
 }

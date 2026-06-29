@@ -11,7 +11,7 @@ const notoSansSC = Noto_Sans_SC({
 });
 
 export const metadata: Metadata = {
-  title: "AI 侦探推理 — 柯南的世界",
+  title: "AI 侦探推理",
   description: "沉浸式 AI 推理案件，挑战你的侦探直觉",
 };
 
