@@ -77,52 +77,79 @@ export const CASE_GENERATION_PROMPT = `你是世界顶级悬疑推理编剧。�
 
 请确保案件质量达到专业剧本杀水平，推理链条严密，不要有逻辑漏洞。`;
 
+import { applyImageStyle, ageAppropriateFaceHint } from './image-prompt';
+
 export const IMAGE_GENERATION_PROMPTS = {
   victim: (name: string, age: number, occupation: string) =>
-    `anime character portrait, ${name}, ${age} years old ${occupation}, Detective Conan anime style, cel-shaded, clean lineart, Japanese mystery anime, dark navy background, dramatic blue lighting, high quality illustration`,
+    applyImageStyle(
+      `Detective Conan anime portrait, original character ${name}, ${ageAppropriateFaceHint(age)}, ${age} years old ${occupation}, half body shot, dark navy background, dramatic side lighting`,
+      'character'
+    ),
 
   suspect: (name: string, age: number, occupation: string, personality: string) =>
-    `anime character portrait, ${name}, ${age} years old ${occupation}, ${personality} expression, Detective Conan anime style, cel-shaded, suspicious look, Japanese mystery anime, dark atmosphere, vivid colors, high quality illustration`,
+    applyImageStyle(
+      `Detective Conan anime portrait, original suspect ${name}, ${ageAppropriateFaceHint(age)}, ${age} years old ${occupation}, ${personality} expression, suspicious look, unique face, half body shot, dark navy background`,
+      'character'
+    ),
 
   scene: (setting: string, description: string) =>
-    `anime crime scene background, ${setting}, ${description}, Detective Conan style, detailed environment art, dark navy and blue tones, dramatic lighting, wide angle, Japanese mystery anime, cinematic composition`,
+    applyImageStyle(
+      `Detective Conan anime crime scene background, wide angle, ${setting}, ${description}, empty scene no people, dark navy atmosphere, dramatic lighting, anime background art`,
+      'scene'
+    ),
 
   evidence: (name: string, description: string) =>
-    `anime style evidence illustration, ${name}, ${description}, Detective Conan mystery clue, cel-shaded, dramatic spotlight lighting, dark background, detailed, high quality anime art`,
+    applyImageStyle(
+      `Detective Conan anime evidence illustration, ${name}, ${description}, dramatic spotlight, dark background, cel shading`,
+      'scene'
+    ),
 
   map: (setting: string) =>
-    `anime style investigation map of ${setting}, Detective Conan blueprint, top-down floor plan, glowing blue lineart on dark navy background, labeled rooms, mystery detective anime aesthetic`,
+    applyImageStyle(
+      `Detective Conan anime investigation map of ${setting}, top-down floor plan, glowing blue lineart on dark navy background, cel shading`,
+      'scene'
+    ),
 };
 
-export const INTERROGATION_SYSTEM_PROMPT = (suspect: any, evidence: string[], caseContext: string) => `
-你正在扮演嫌疑人：${suspect.name}
+export const INTERROGATION_SYSTEM_PROMPT = (
+  suspect: { id: string; name: string; isGuilty?: boolean },
+  evidence: string[],
+  knowledgeContext: string[]
+) => `
+你是剧本杀中的嫌疑人「${suspect.name}」（id: ${suspect.id}）。以下片段来自本案知识库，是与当前对话最相关的设定，所有回答必须与之一致，不得编造矛盾信息。
 
-角色信息：
-- 年龄：${suspect.age}
-- 职业：${suspect.occupation}
-- 性格：${suspect.personality}
-- 与死者关系：${suspect.relationship}
-- 不在场证明：${suspect.alibi}
-- 动机：${suspect.motive}
-- 秘密：${suspect.secrets.join('、')}
-- 是否是真凶：${suspect.isGuilty ? '是' : '否'}
+【案件知识库（检索片段）】
+${knowledgeContext.map((block, i) => `--- 片段 ${i + 1} ---\n${block}`).join('\n\n')}
 
-案件背景：
-${caseContext}
+【侦探已发现的证据】
+${evidence.length > 0 ? evidence.join('\n') : '（暂无）'}
 
-已发现的证据：
-${evidence.join('\n')}
-
-扮演规则：
-1. 保持角色一致性，根据性格特点回答
-2. 如果是真凶，要巧妙撒谎和回避，但不能太明显
-3. 如果不是真凶，要真实回答，但可以隐藏与案件无关的秘密
-4. 当被确凿证据击破时，可以改口或情绪波动
-5. 回答要自然，像真人对话，不要太机械
-6. 可以反问侦探，表现出紧张、愤怒、悲伤等情绪
-7. 每次回答控制在100字以内
+【扮演规则】
+1. 严格以知识库片段为准：时间线、证据、人物关系不得与设定冲突
+2. 若你是真凶（片段中含「是否真凶：是」或真相片段）：知晓作案细节，需巧妙撒谎、回避或转移话题，但不能与 timeline/evidence 明显矛盾
+3. 若非真凶：如实回答与己相关的问题，可隐藏与案件无关的隐私
+4. 被确凿证据击破时可改口或情绪波动，但仍需符合性格设定
+5. 第一人称、口语化，每次回答 100 字以内，可表现紧张/愤怒/悲伤
+6. 禁止向侦探透露「你是 AI」或知识库结构；禁止直接泄露真相（除非被证据逼到绝境）
 
 请以第一人称回答侦探的问题。
+`;
+
+/** 知识库检索失败时回退为完整案件 JSON */
+export const INTERROGATION_FALLBACK_PROMPT = (
+  suspect: { id: string; name: string },
+  evidence: string[],
+  caseJson: string
+) => `
+你是剧本杀中的嫌疑人「${suspect.name}」（id: ${suspect.id}）。以下 JSON 是本案的权威设定，所有回答必须与之一致。
+
+【案件设定 JSON】
+${caseJson}
+
+【侦探已发现的证据】
+${evidence.length > 0 ? evidence.join('\n') : '（暂无）'}
+
+请以第一人称、口语化回答，每次 100 字以内。
 `;
 
 export const DEDUCTION_EVALUATION_PROMPT = (caseData: CaseData, userDeduction: string) => `

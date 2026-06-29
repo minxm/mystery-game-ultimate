@@ -91,7 +91,7 @@ export default function CasePage() {
   }
 
   return (
-    <div className="min-h-screen relative overflow-hidden bg-dark-900">
+    <div className="min-h-screen relative overflow-hidden bg-dark-900 page-shell">
       <ParticleBackground />
 
       {/* 四角扫描框 */}
@@ -134,28 +134,31 @@ export default function CasePage() {
           initial={{ opacity: 0, scale: 0.96 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={{ duration: 0.6 }}
-          className="text-center mb-10"
+          className="text-center mb-10 space-y-5"
         >
-          <div className="inline-block relative">
-            {/* 警告标签 */}
-            <span className="absolute -top-4 left-1/2 -translate-x-1/2 text-[10px] tracking-[0.4em] text-danger-500 font-bold">
-              ▶ CONFIDENTIAL ◀
-            </span>
-            <h1 className="text-4xl md:text-6xl font-black conan-title py-2 tracking-wider">
-              {caseData.title}
-            </h1>
-          </div>
+          <span className="confidential-badge">
+            <span className="text-danger-500">▶</span>
+            CONFIDENTIAL
+            <span className="text-danger-500">◀</span>
+          </span>
 
-          <div className="flex flex-wrap items-center justify-center gap-4 mt-6 text-sm">
+          <h1 className="text-3xl sm:text-4xl md:text-6xl font-black conan-title tracking-wider px-2 leading-tight">
+            {caseData.title}
+          </h1>
+
+          <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-3 max-w-3xl mx-auto text-xs sm:text-sm">
             {[
               { icon: Search, text: caseData.setting },
               { icon: Users, text: `${caseData.suspects.length} 名嫌疑人` },
               { icon: Clock, text: `难度：${DIFFICULTY_LABEL[caseData.difficulty] ?? caseData.difficulty}` },
               { icon: AlertTriangle, text: caseData.deathMethod },
             ].map(({ icon: Icon, text }, i) => (
-              <span key={i} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full glass text-blue-300/80 border border-blue-500/20">
-                <Icon className="w-3.5 h-3.5 text-blue-400" />
-                {text}
+              <span
+                key={i}
+                className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-full glass text-blue-300/80 border border-blue-500/20 max-w-full"
+              >
+                <Icon className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                <span className="truncate">{text}</span>
               </span>
             ))}
           </div>
@@ -279,7 +282,7 @@ export default function CasePage() {
             <div className="flex-1 h-px bg-gradient-to-r from-transparent via-blue-500/40 to-transparent" />
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6 md:gap-7 px-1">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-5 md:gap-7 overflow-x-hidden">
             {caseData.suspects.map((suspect, index) => {
               const accent = SUSPECT_ACCENTS[index % SUSPECT_ACCENTS.length];
               const genderLabel = suspect.gender === 'female' ? '女' : suspect.gender === 'male' ? '男' : '—';

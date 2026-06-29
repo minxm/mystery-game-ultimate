@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, Send, Info, X } from 'lucide-react';
 import { CaseData, Suspect, InterrogationMessage } from '@/lib/types';
 import { storage, loadCaseData, findSuspectByParam, getSuspectId } from '@/lib/utils';
+import { serializeCaseForPrompt } from '@/lib/case-prompt';
 import { getAvatarPlaceholder } from '@/lib/placeholder';
 import ParticleBackground from '@/components/ParticleBackground';
 import Image from 'next/image';
@@ -117,10 +118,25 @@ export default function InterrogateClient() {
       timestamp: Date.now(),
     };
 
-    setMessages((prev) => [...prev, userMessage]);
+    const streamTimestamp = Date.now() + 1;
+    const streamingPlaceholder: InterrogationMessage = {
+      role: 'assistant',
+      content: '',
+      timestamp: streamTimestamp,
+    };
+
+    setMessages((prev) => [...prev, userMessage, streamingPlaceholder]);
     setInput('');
     setIsLoading(true);
     inputRef.current?.focus();
+
+    const updateStreamingMessage = (content: string) => {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.timestamp === streamTimestamp ? { ...m, content } : m
+        )
+      );
+    };
 
     try {
       const progress = storage.getProgress(caseData.id);
@@ -130,59 +146,114 @@ export default function InterrogateClient() {
         .map((e) => `${e.name}: ${e.description}`);
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000);
+      const timeoutId = setTimeout(() => controller.abort(), 60000);
 
       const response = await fetch('/api/interrogate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          suspect,
-          messages: messages.map((m) => ({ role: m.role, content: m.content })),
+          suspect: {
+            id: suspect.id,
+            name: suspect.name,
+            isGuilty: suspect.isGuilty,
+          },
+          messages: [...messages, userMessage].map((m) => ({
+            role: m.role,
+            content: m.content,
+          })),
           evidence: evidenceTexts,
-          caseContext: `${caseData.sceneDescription}\n死因：${caseData.deathMethod}`,
+          caseData: JSON.parse(serializeCaseForPrompt(caseData)),
         }),
         signal: controller.signal,
       });
 
       clearTimeout(timeoutId);
 
-      const data = await response.json();
-      if (data.success) {
-        const assistantMessage: InterrogationMessage = {
-          role: 'assistant',
-          content: data.response,
-          timestamp: Date.now(),
-        };
-        setMessages((prev) => {
-          const updated = [...prev, assistantMessage];
-          storage.saveInterrogation(caseData.id, suspect.id, updated);
-          return updated;
-        });
-
-        if (progress && !progress.interrogatedSuspects.includes(suspect.id)) {
-          storage.saveProgress({
-            ...progress,
-            interrogatedSuspects: [...progress.interrogatedSuspects, suspect.id],
-          });
-        }
-      } else {
-        const errorMessage: InterrogationMessage = {
-          role: 'assistant',
-          content: data.error || '抱歉，我现在有点紧张，不知道该说什么...',
-          timestamp: Date.now(),
-        };
-        setMessages((prev) => [...prev, errorMessage]);
+      if (!response.ok || !response.body) {
+        throw new Error('审问请求失败');
       }
-    } catch (error: any) {
-      const errorMessage: InterrogationMessage = {
-        role: 'assistant',
-        content:
-          error.name === 'AbortError'
-            ? '请求超时，请重试...'
-            : '抱歉，我现在有点紧张，不知道该说什么...',
-        timestamp: Date.now(),
-      };
-      setMessages((prev) => [...prev, errorMessage]);
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let streamedContent = '';
+      let finalContent = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split('\n\n');
+        buffer = events.pop() || '';
+
+        for (const event of events) {
+          const line = event.trim();
+          if (!line.startsWith('data: ')) continue;
+
+          let payload: { delta?: string; done?: boolean; content?: string; error?: string };
+          try {
+            payload = JSON.parse(line.slice(6));
+          } catch {
+            continue;
+          }
+
+          if (payload.error) {
+            finalContent = payload.content || payload.error;
+            updateStreamingMessage(finalContent);
+            break;
+          }
+
+          if (payload.delta) {
+            streamedContent += payload.delta;
+            updateStreamingMessage(streamedContent);
+          }
+
+          if (payload.done && payload.content) {
+            finalContent = payload.content;
+            updateStreamingMessage(finalContent);
+          }
+        }
+      }
+
+      const replyContent =
+        finalContent || streamedContent || '抱歉，我现在有点紧张，不知道该说什么...';
+      updateStreamingMessage(replyContent);
+
+      setMessages((prev) => {
+        const updated = prev.map((m) =>
+          m.timestamp === streamTimestamp ? { ...m, content: replyContent } : m
+        );
+        storage.saveInterrogation(caseData.id, suspect.id, updated);
+        return updated;
+      });
+
+      if (progress && !progress.interrogatedSuspects.includes(suspect.id)) {
+        storage.saveProgress({
+          ...progress,
+          interrogatedSuspects: [...progress.interrogatedSuspects, suspect.id],
+        });
+      }
+    } catch (error: unknown) {
+      const err = error as { name?: string };
+      const errorContent =
+        err.name === 'AbortError'
+          ? '请求超时，请重试...'
+          : '抱歉，我现在有点紧张，不知道该说什么...';
+
+      setMessages((prev) => {
+        const hasPlaceholder = prev.some((m) => m.timestamp === streamTimestamp);
+        const updated = hasPlaceholder
+          ? prev.map((m) =>
+              m.timestamp === streamTimestamp ? { ...m, content: errorContent } : m
+            )
+          : [
+              ...prev,
+              { role: 'assistant' as const, content: errorContent, timestamp: Date.now() },
+            ];
+        storage.saveInterrogation(caseData.id, suspect.id, updated);
+        return updated;
+      });
     } finally {
       setIsLoading(false);
     }
@@ -221,7 +292,7 @@ export default function InterrogateClient() {
   const tips = ['询问不在场证明', '用证据质问对方', '注意情绪与回避', '对比不同嫌疑人'];
 
   return (
-    <div className="h-[100dvh] flex flex-col relative bg-dark-900 overflow-hidden">
+    <div className="h-[100dvh] flex flex-col relative bg-dark-900 overflow-hidden page-shell max-w-[100vw]">
       <ParticleBackground />
 
       {/* ── 顶部导航栏 ── */}
@@ -229,7 +300,7 @@ export default function InterrogateClient() {
         className="relative z-20 flex-shrink-0 border-b border-blue-900/30"
         style={{ background: 'rgba(4,13,26,0.94)', backdropFilter: 'blur(20px)' }}
       >
-        <div className="flex items-center gap-2 px-3 py-2.5 sm:px-4 sm:py-3">
+        <div className="flex items-center gap-2 px-3 py-2.5 sm:px-4 sm:py-3 min-w-0 max-w-full">
           {/* 返回按钮 */}
           <button
             type="button"
@@ -316,23 +387,35 @@ export default function InterrogateClient() {
       </header>
 
       {/* ── 消息区域 ── */}
-      <div className="relative z-10 flex-1 overflow-y-auto overscroll-contain">
-        <div className="px-3 sm:px-4 py-4 space-y-3 pb-2">
+      <div className="relative z-10 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain min-w-0 w-full">
+        <div className="px-3 sm:px-4 py-4 space-y-3 pb-2 w-full max-w-4xl mx-auto min-w-0 box-border">
 
           {/* 审问室信息条 */}
-          <div className="flex items-center gap-3 my-2">
-            <div className="flex-1 h-px bg-blue-900/40" />
-            <span className="text-[10px] font-mono text-blue-500/30 tracking-widest px-2">INTERROGATION ROOM · {new Date().toLocaleDateString('zh-CN')}</span>
-            <div className="flex-1 h-px bg-blue-900/40" />
+          <div className="flex items-center gap-2 my-2 min-w-0 w-full">
+            <div className="flex-1 min-w-0 h-px bg-blue-900/40" />
+            <span className="text-[10px] font-mono text-blue-500/40 tracking-widest px-1 shrink-0 whitespace-nowrap">
+              <span className="hidden sm:inline">INTERROGATION · </span>
+              审问室
+            </span>
+            <div className="flex-1 min-w-0 h-px bg-blue-900/40" />
           </div>
 
-          {messages.map((message, index) => (
+          {messages.map((message, index) => {
+            const isStreamingBubble =
+              isLoading &&
+              index === messages.length - 1 &&
+              message.role === 'assistant' &&
+              !message.content;
+
+            return (
             <motion.div
-              key={index}
+              key={message.timestamp}
               initial={{ opacity: 0, y: 8, scale: 0.97 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               transition={{ duration: 0.2 }}
-              className={`flex items-end gap-2 ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+              className={`flex items-end gap-1.5 sm:gap-2 w-full min-w-0 ${
+                message.role === 'user' ? 'justify-end' : 'justify-start'
+              }`}
             >
               {/* 嫌疑人头像 */}
               {message.role === 'assistant' && (
@@ -346,27 +429,30 @@ export default function InterrogateClient() {
               )}
 
               <div
-                className={`max-w-[80%] sm:max-w-[72%] px-4 py-3 text-sm leading-relaxed ${
+                className={`min-w-0 max-w-[min(82%,calc(100vw-3.5rem))] sm:max-w-[72%] px-3.5 sm:px-4 py-2.5 sm:py-3 text-sm leading-relaxed ${
                   message.role === 'user'
-                    ? 'rounded-2xl rounded-br-sm text-white'
-                    : 'rounded-2xl rounded-bl-sm text-gray-200 border border-blue-900/20'
+                    ? 'rounded-2xl rounded-br-sm text-white chat-bubble-user'
+                    : 'rounded-2xl rounded-bl-sm text-gray-200 chat-bubble-suspect'
                 }`}
-                style={
-                  message.role === 'user'
-                    ? {
-                        background: 'linear-gradient(135deg, #0055bb, #1e90ff)',
-                        boxShadow: '0 2px 16px rgba(30,144,255,0.35)',
-                      }
-                    : {
-                        background: 'rgba(10,24,48,0.85)',
-                        backdropFilter: 'blur(8px)',
-                      }
-                }
               >
-                <p className="whitespace-pre-wrap break-words">{message.content}</p>
+                {isStreamingBubble ? (
+                  <div className="flex gap-1.5 items-center h-4 py-0.5">
+                    {[0, 150, 300].map((delay) => (
+                      <div
+                        key={delay}
+                        className="w-2 h-2 rounded-full bg-blue-400"
+                        style={{ animation: `bounce 1s ${delay}ms infinite` }}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <p className="whitespace-pre-wrap break-words">{message.content}</p>
+                )}
+                {!isStreamingBubble && (
                 <p className={`text-[10px] mt-1.5 font-mono ${message.role === 'user' ? 'text-blue-200/50 text-right' : 'text-gray-600'}`}>
                   {new Date(message.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
                 </p>
+                )}
               </div>
 
               {/* 侦探图标 */}
@@ -376,38 +462,8 @@ export default function InterrogateClient() {
                 </div>
               )}
             </motion.div>
-          ))}
-
-          {/* 加载中动画 */}
-          {isLoading && (
-            <motion.div
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="flex items-end gap-2 justify-start"
-            >
-              <div className="relative w-7 h-7 rounded-full overflow-hidden border border-blood-500/40 flex-shrink-0 mb-0.5">
-                {suspect.imageUrl && !imgError ? (
-                  <Image src={suspect.imageUrl} alt={suspect.name} fill className="object-cover object-top" unoptimized onError={() => setImgError(true)} />
-                ) : (
-                  <div className="w-full h-full bg-cover bg-center" style={{ backgroundImage: `url("${getAvatarPlaceholder(suspect.name)}")` }} />
-                )}
-              </div>
-              <div
-                className="px-4 py-3 rounded-2xl rounded-bl-sm border border-blue-900/20"
-                style={{ background: 'rgba(10,24,48,0.85)' }}
-              >
-                <div className="flex gap-1.5 items-center h-4">
-                  {[0, 150, 300].map((delay) => (
-                    <div
-                      key={delay}
-                      className="w-2 h-2 rounded-full bg-blue-400"
-                      style={{ animation: `bounce 1s ${delay}ms infinite` }}
-                    />
-                  ))}
-                </div>
-              </div>
-            </motion.div>
-          )}
+            );
+          })}
 
           <div ref={messagesEndRef} />
         </div>
@@ -415,10 +471,10 @@ export default function InterrogateClient() {
 
       {/* ── 输入区域（固定底部）── */}
       <div
-        className="relative z-20 flex-shrink-0 border-t border-blue-900/30 px-3 sm:px-4 py-2.5 sm:py-3"
+        className="relative z-20 flex-shrink-0 border-t border-blue-900/30 px-3 sm:px-4 py-2.5 sm:py-3 min-w-0 w-full"
         style={{ background: 'rgba(4,13,26,0.94)', backdropFilter: 'blur(20px)' }}
       >
-        <div className="flex gap-2 items-center max-w-4xl mx-auto">
+        <div className="flex gap-2 items-center max-w-4xl mx-auto min-w-0 w-full">
           <input
             ref={inputRef}
             type="text"

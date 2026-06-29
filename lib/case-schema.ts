@@ -23,6 +23,44 @@ function normalizeSuspects(raw: unknown): Record<string, unknown>[] {
   return list.filter((s) => s && typeof s === 'object') as Record<string, unknown>[];
 }
 
+/** 将 truth 规范为前端可安全展示的结构（兼容 AI 返回字符串或中文键名） */
+export function normalizeTruthShape(truth: unknown): {
+  killer: string;
+  method: string;
+  motive: string;
+  process: string[];
+  keyClues: string[];
+} {
+  const t =
+    truth && typeof truth === 'object' && !Array.isArray(truth)
+      ? (truth as Record<string, unknown>)
+      : {};
+
+  const toStringList = (raw: unknown): string[] => {
+    if (Array.isArray(raw)) {
+      return raw.map((item) => String(item).trim()).filter(Boolean);
+    }
+    if (typeof raw === 'string') {
+      const trimmed = raw.trim();
+      if (!trimmed) return [];
+      const parts = trimmed.split(/[→\n;；,、]+/).map((s) => s.trim()).filter(Boolean);
+      return parts.length > 0 ? parts : [trimmed];
+    }
+    return [];
+  };
+
+  const process = toStringList(t.process ?? t.作案过程 ?? t.steps);
+  const keyClues = toStringList(t.keyClues ?? t.key_clues ?? t.关键线索 ?? t.clues);
+
+  return {
+    killer: String(t.killer ?? t.凶手 ?? '未知'),
+    method: String(t.method ?? t.手法 ?? '暂无记录'),
+    motive: String(t.motive ?? t.动机 ?? '暂无记录'),
+    process: process.length > 0 ? process : ['暂无详细过程记录'],
+    keyClues: keyClues.length > 0 ? keyClues : ['暂无关键线索记录'],
+  };
+}
+
 function normalizeTruth(raw: unknown): Record<string, unknown> | null {
   const obj = asRecord(raw);
   const truth = obj.truth ?? obj.真相;
@@ -111,6 +149,14 @@ export function validateCaseDetails(data: unknown): {
       : [];
 
   return { evidence, timeline, redHerrings };
+}
+
+/** 校验 Qwen3-8B 一次性输出的完整案件 JSON */
+export function validateFullCase(data: unknown): Record<string, unknown> {
+  const base = validateCaseBase(data);
+  const cast = validateCaseCast(data);
+  const details = validateCaseDetails(data);
+  return mergeCasePhases(base, cast, details);
 }
 
 /** 显式合并三阶段，避免 spread 覆盖掉 suspects/truth 等核心字段 */

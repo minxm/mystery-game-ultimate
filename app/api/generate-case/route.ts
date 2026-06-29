@@ -1,11 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { generateCaseWithAI } from '@/lib/ai';
 import { buildCaseDataWithImages } from '@/lib/case-assembler';
-import { buildCaseFromPhases } from '@/lib/generate-case-orchestrator';
 import {
   getCaseGenerationMaxRetries,
   getCaseGenerationTimeoutMs,
-  getLocalPhasesTimeoutMs,
   isServerlessEnv,
 } from '@/lib/ai-config';
 import { generateId } from '@/lib/utils';
@@ -39,9 +37,9 @@ async function generateCaseWithRetry<T>(label: string, fn: () => Promise<T>): Pr
     try {
       console.log(`[API] ${label} attempt ${attempt}/${maxRetries}, timeout: ${timeoutMs}ms`);
       return await withTimeout(fn(), timeoutMs, label);
-    } catch (error: any) {
-      lastError = error;
-      console.warn(`[API] ${label} attempt ${attempt} failed:`, error.message);
+    } catch (error: unknown) {
+      lastError = error as Error;
+      console.warn(`[API] ${label} attempt ${attempt} failed:`, lastError.message);
       if (attempt < maxRetries) {
         await new Promise((resolve) => setTimeout(resolve, 500));
       }
@@ -49,6 +47,41 @@ async function generateCaseWithRetry<T>(label: string, fn: () => Promise<T>): Pr
   }
 
   throw lastError ?? new Error(`${label} failed`);
+}
+
+async function triggerBackgroundGeneration(
+  origin: string,
+  jobId: string,
+  difficulty: string
+): Promise<void> {
+  if (isServerlessEnv()) {
+    const triggerRes = await fetch(`${origin}/.netlify/functions/generate-case-background`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jobId, difficulty }),
+    }).catch((e: unknown) => {
+      console.error('[API] Trigger Netlify background failed:', (e as Error)?.message);
+      return null;
+    });
+
+    if (!triggerRes || (triggerRes.status !== 202 && !triggerRes.ok)) {
+      throw new Error(
+        `后台生成任务触发失败${triggerRes ? `（HTTP ${triggerRes.status}）` : ''}`
+      );
+    }
+    console.log('[API] Netlify background job triggered:', jobId);
+    return;
+  }
+
+  // 本地开发：触发独立 worker 路由，立即返回 jobId，前端轮询 status
+  void fetch(`${origin}/api/generate-case/worker`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jobId, difficulty }),
+  }).catch((e: unknown) => {
+    console.error('[API] Local worker trigger failed:', (e as Error)?.message);
+  });
+  console.log('[API] Local worker job triggered:', jobId);
 }
 
 export async function POST(request: NextRequest) {
@@ -59,45 +92,12 @@ export async function POST(request: NextRequest) {
     console.log('[API] Case generation request:', { difficulty, phase, serverless: isServerlessEnv() });
 
     if (phase === 'start') {
-      if (isServerlessEnv()) {
-        // Serverless 环境（Netlify）：同步函数受 ~26s 网关硬超时限制，
-        // 72B 大模型 + 跨境调用国内 API 经常超时回退默认案件。
-        // 改为异步：创建 pending 任务 → 触发可运行 15 分钟的后台函数 → 前端轮询 /status。
-        const jobId = generateId();
-        await setCaseJob(jobId, { status: 'pending', createdAt: Date.now() });
+      const jobId = generateId();
+      await setCaseJob(jobId, { status: 'pending', stage: 'pending', createdAt: Date.now() });
 
-        const origin = request.nextUrl.origin;
-        const triggerRes = await fetch(
-          `${origin}/.netlify/functions/generate-case-background`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ jobId, difficulty }),
-          }
-        ).catch((e: any) => {
-          console.error('[API] Trigger background function failed:', e?.message);
-          return null;
-        });
+      await triggerBackgroundGeneration(request.nextUrl.origin, jobId, difficulty);
 
-        // 后台函数正常会立即返回 202 Accepted
-        if (!triggerRes || (triggerRes.status !== 202 && !triggerRes.ok)) {
-          throw new Error(
-            `后台生成任务触发失败${triggerRes ? `（HTTP ${triggerRes.status}）` : ''}`
-          );
-        }
-
-        console.log('[API] Background job triggered:', jobId);
-        return NextResponse.json({ success: true, jobId });
-      }
-
-      // 本地开发：多阶段生成。本地无 Serverless 网关硬超时，提示词变长后生成更慢，
-      // 用更大的可配置总超时（默认 150s），避免还没生成完就回退默认案件。
-      const caseData = await withTimeout(
-        buildCaseFromPhases(difficulty),
-        getLocalPhasesTimeoutMs(),
-        'Local buildCaseFromPhases'
-      );
-      return NextResponse.json({ success: true, sync: true, caseId: caseData.id, caseData });
+      return NextResponse.json({ success: true, jobId });
     }
 
     const caseContent = await generateCaseWithRetry('Case generation', () =>
@@ -108,20 +108,21 @@ export async function POST(request: NextRequest) {
     console.log('[API] Case data created successfully, id:', caseData.id);
 
     return NextResponse.json({ success: true, caseId: caseData.id, caseData });
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const err = error as { message?: string; status?: number; type?: string; code?: string; stack?: string };
     console.error('[API] Case generation failed:', {
-      message: error.message,
-      status: error.status,
-      type: error.type,
-      stack: error.stack?.substring(0, 500),
+      message: err.message,
+      status: err.status,
+      type: err.type,
+      stack: err.stack?.substring(0, 500),
     });
 
-    if (error.status === 401 || error.message?.includes('SILICONFLOW_API_KEY')) {
+    if (err.status === 401 || err.message?.includes('SILICONFLOW_API_KEY')) {
       return NextResponse.json(
         {
           success: false,
           error:
-            error.message ||
+            err.message ||
             'API 密钥无效。请在 .env.local 配置 SILICONFLOW_API_KEY（从 https://cloud.siliconflow.cn 获取）',
         },
         { status: 401 }
@@ -129,9 +130,9 @@ export async function POST(request: NextRequest) {
     }
 
     const isTimeout =
-      error.message?.includes('timed out') ||
-      error.message?.includes('timeout') ||
-      error.code === 'ECONNABORTED';
+      err.message?.includes('timed out') ||
+      err.message?.includes('timeout') ||
+      err.code === 'ECONNABORTED';
 
     console.log('[API] Using fallback case, isTimeout:', isTimeout);
     const fallbackCase = createFallbackCase();

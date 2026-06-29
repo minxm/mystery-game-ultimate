@@ -18,13 +18,15 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       success: true,
       status: job.status,
+      stage: job.stage || (job.status === 'done' ? 'done' : 'pending'),
+      progressMessage: job.progressMessage,
       caseData: job.caseData,
       error: job.error,
     });
   } catch (error: any) {
     console.error('[API] Status check failed:', error.message);
     return NextResponse.json(
-      { success: false, error: '无法读取任务状态，请确认已启用 Netlify Blobs' },
+      { success: false, error: '无法读取任务状态' },
       { status: 500 }
     );
   }

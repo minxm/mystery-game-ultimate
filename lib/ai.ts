@@ -1,10 +1,22 @@
 import OpenAI from 'openai';
-import { AI_CONFIG, getAiConfigError, isServerlessEnv } from './ai-config';
+import { AI_CONFIG, getAiConfigError, getJsonGenerationClientTimeoutMs, isServerlessEnv } from './ai-config';
 import {
   validateCaseBase,
   validateCaseCast,
   validateCaseDetails,
+  validateFullCase,
 } from './case-schema';
+import { serializeCaseForPrompt } from './case-prompt';
+import {
+  CaseImagePrompts,
+  IMAGE_CHARACTER_EXTRA,
+  IMAGE_NEGATIVE_HINT,
+  IMAGE_SCENE_NEGATIVE_HINT,
+  IMAGE_STYLE_SUFFIX,
+  ageAppropriateFaceHint,
+  buildFallbackImagePrompts,
+  normalizeImagePrompts,
+} from './image-prompt';
 import { getScoreRating } from './utils';
 
 const configError = getAiConfigError();
@@ -13,9 +25,13 @@ console.log('[AI] Initializing SiliconFlow client...');
 console.log('[AI] API Key source:', AI_CONFIG.apiKeySource);
 console.log('[AI] API Key exists:', !!AI_CONFIG.apiKey);
 console.log('[AI] Base URL:', AI_CONFIG.baseURL);
-console.log('[AI] Text model:', AI_CONFIG.textModel);
+console.log('[AI] Case framework model:', AI_CONFIG.caseFrameworkModel);
+console.log('[AI] Case polish model:', AI_CONFIG.casePolishModel);
 console.log('[AI] Chat model:', AI_CONFIG.chatModel);
+console.log('[AI] Evaluate model:', AI_CONFIG.evaluateModel);
+console.log('[AI] Image prompt model:', AI_CONFIG.imagePromptModel);
 console.log('[AI] Image model:', AI_CONFIG.imageModel);
+console.log('[AI] Embedding model:', AI_CONFIG.embeddingModel);
 if (configError) {
   console.error('[AI] Configuration error:', configError);
 }
@@ -26,6 +42,24 @@ const client = new OpenAI({
   timeout: isServerlessEnv() ? 120000 : 60000,
   maxRetries: 0,
 });
+
+/** 案件 JSON / 图片 Prompt 等长耗时请求专用客户端 */
+const jsonClient = new OpenAI({
+  apiKey: AI_CONFIG.apiKey,
+  baseURL: AI_CONFIG.baseURL,
+  timeout: getJsonGenerationClientTimeoutMs(),
+  maxRetries: 0,
+});
+
+function isQwen3Model(model: string): boolean {
+  return /Qwen\/Qwen3/i.test(model);
+}
+
+/** Qwen3 / Qwen3.5 思考模型默认极慢；JSON 生成必须关闭 thinking */
+function getThinkingDisabledExtraBody(model: string): Record<string, unknown> {
+  if (!isQwen3Model(model)) return {};
+  return { extra_body: { enable_thinking: false } };
+}
 
 function assertApiKeyConfigured() {
   const error = getAiConfigError();
@@ -45,6 +79,120 @@ function extractJsonContent(content: string): string {
   }
 
   return withoutThink;
+}
+
+function buildStructuredCasePrompt(difficulty: string, theme?: string) {
+  const era = pick(ERAS);
+  const location = pick(LOCATIONS);
+  const motif = pick(MOTIFS);
+  const deathHint = pick(DEATH_METHODS);
+  const victimRole = pick(VICTIM_ROLES);
+  const guiltyPos = Math.floor(Math.random() * 3);
+  const guiltyId = `s${guiltyPos + 1}`;
+  const innocentIds = ['s1', 's2', 's3'].filter((id) => id !== guiltyId).join(' 和 ');
+
+  return `你是世界顶级悬疑推理编剧。请一次性生成完整剧本杀案件的结构化 JSON。
+
+难度：${difficulty}
+${theme ? `主题偏好：${theme}` : ''}
+
+【本次随机创作参数，必须严格遵照】
+- 时代背景：${era}
+- 案发地点：${location}
+- 核心矛盾：${motif}
+- 死亡方式参考：${deathHint}
+- 受害者职业参考：${victimRole}
+
+【质量要求】
+1. 三名嫌疑人动机与可疑行为均充分，真凶仅 ${guiltyId}（isGuilty:true），${innocentIds} 必须为 false
+2. 至少两层误导（redHerrings），至少 3 条关键线索需交叉推理
+3. 作案手法逻辑闭环；每个角色有 secrets，但并非都与案件相关
+4. 使用个性中文名（如凌霜月、方若水），严禁张三李四
+
+【JSON 结构】
+{
+  "title": "5-10字标题",
+  "setting": "具体场所",
+  "victim": { "name", "gender": "male|female", "age", "occupation", "background": "50字内" },
+  "deathMethod": "死亡方式",
+  "sceneDescription": "150字内现场描述，含一处异常细节",
+  "suspects": [
+    { "id": "s1|s2|s3", "name", "gender", "age", "occupation", "relationship", "alibi": "30字内", "motive": "30字内", "personality": "20字内", "secrets": ["..."], "isGuilty": true|false }
+  ],
+  "evidence": [ { "id": "e1-e4", "name", "description": "40字内", "location", "significance", "relatedSuspects": ["s1"] } ],
+  "timeline": [ { "time", "event": "30字内", "location", "significance": "low|medium|high|critical" } ],
+  "truth": { "killer": "与 isGuilty:true 同名", "method": "80字内", "motive": "40字内", "process": ["步骤1","步骤2","步骤3"], "keyClues": ["线索1","线索2"] },
+  "redHerrings": ["误导1","误导2"]
+}
+
+evidence 4 条，timeline 5 条，redHerrings 2 条。只输出 JSON，不要 markdown 或解释。`;
+}
+
+/** Qwen3.5-4B 框架 prompt：字段齐全但文案从简，供后续 8B 润色 */
+function buildCaseFrameworkPrompt(difficulty: string, theme?: string) {
+  const era = pick(ERAS);
+  const location = pick(LOCATIONS);
+  const motif = pick(MOTIFS);
+  const deathHint = pick(DEATH_METHODS);
+  const victimRole = pick(VICTIM_ROLES);
+  const guiltyPos = Math.floor(Math.random() * 3);
+  const guiltyId = `s${guiltyPos + 1}`;
+  const innocentIds = ['s1', 's2', 's3'].filter((id) => id !== guiltyId).join(' 和 ');
+
+  return `你是悬疑案件架构师。请快速输出一份「案件框架 JSON」（骨架即可，描述从简，后续会润色）。
+
+难度：${difficulty}
+${theme ? `主题：${theme}` : ''}
+
+【创作参数，必须遵照】
+时代：${era} | 地点：${location} | 矛盾：${motif} | 死因参考：${deathHint} | 受害者职业参考：${victimRole}
+
+【逻辑约束】
+- 真凶仅 ${guiltyId}（isGuilty:true），${innocentIds} 为 false
+- 逻辑闭环，个性中文名，严禁张三李四
+- 文案从简：background/alibi/motive 各 20 字内，sceneDescription 80 字内
+
+【JSON 结构 — 字段必须齐全】
+{
+  "title", "setting",
+  "victim": { "name", "gender", "age", "occupation", "background" },
+  "deathMethod", "sceneDescription",
+  "suspects": [ { "id":"s1|s2|s3", "name", "gender", "age", "occupation", "relationship", "alibi", "motive", "personality", "secrets":["..."], "isGuilty" } ],
+  "evidence": [ { "id":"e1-e4", "name", "description", "location", "significance", "relatedSuspects" } ],
+  "timeline": [ { "time", "event", "location", "significance" } ],
+  "truth": { "killer", "method", "motive", "process":["..."], "keyClues":["..."] },
+  "redHerrings": ["...", "..."]
+}
+
+suspects 3 人，evidence 4 条，timeline 5 条，redHerrings 2 条。只输出 JSON。`;
+}
+
+function buildCasePolishPrompt(
+  difficulty: string,
+  framework: Record<string, unknown>,
+  theme?: string
+) {
+  return `你是世界顶级悬疑推理编剧。请对下方「案件框架 JSON」进行润色，输出同结构的完整 JSON。
+
+难度：${difficulty}
+${theme ? `主题：${theme}` : ''}
+
+【硬性约束 — 不得修改】
+1. suspects 的 id、isGuilty、真凶身份（truth.killer 与 isGuilty:true 同名）
+2. evidence / timeline 的数量与各 id（e1-e4、s1-s3）
+3. relatedSuspects 与 truth.keyClues 的逻辑指向
+4. 整体作案逻辑闭环
+
+【润色要求】
+1. 丰富 sceneDescription（150 字内）、victim.background、嫌疑人 personality/secrets
+2. 强化 evidence 与 timeline 的交叉推理价值，完善 redHerrings 误导层
+3. 润色 truth.method/process，增强「原来如此」的反转感
+4. 保持个性中文名，禁止张三李四
+
+【案件框架 JSON】
+${JSON.stringify(framework)}
+
+只输出润色后的完整 JSON，不要 markdown 或解释。`;
 }
 
 function buildFullCasePrompt(difficulty: string, theme?: string) {
@@ -191,37 +339,121 @@ function buildCaseDetailsPrompt(difficulty: string, core: Record<string, unknown
 要求：evidence 4 条（id 为 e1-e4），timeline 5 条，redHerrings 2 条。relatedSuspects 用嫌疑人 id（s1/s2/s3）。只输出 JSON。`;
 }
 
-async function callCaseJson(prompt: string, maxTokens: number) {
+async function callCaseJson(
+  prompt: string,
+  maxTokens: number,
+  model: string = AI_CONFIG.casePolishModel,
+  roleHint = '悬疑推理编剧'
+) {
   assertApiKeyConfigured();
-  const completion = await client.chat.completions.create({
-    model: AI_CONFIG.textModel,
+  const completion = await jsonClient.chat.completions.create({
+    model,
     messages: [
       {
         role: 'system',
-        content:
-          '你是悬疑推理编剧。只输出一个合法 JSON 对象，禁止任何解释、markdown 代码块、思考过程或重复内容。',
+        content: `/no_think\n你是${roleHint}。只输出一个合法 JSON 对象，禁止任何解释、markdown 代码块、思考过程或重复内容。`,
       },
       { role: 'user', content: prompt },
     ],
-    // 降低温度 + 频率惩罚，避免小概率的 token 重复退化（如 "isisis..." 死循环）
     temperature: 0.6,
     frequency_penalty: 0.3,
     max_tokens: maxTokens,
     response_format: { type: 'json_object' },
-  });
+    ...getThinkingDisabledExtraBody(model),
+  } as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming);
   const choice = completion.choices[0];
   const finishReason = choice.finish_reason;
   if (finishReason === 'length') {
-    // 输出被 max_tokens 截断，JSON 不完整，直接报错让上层重试或使用 fallback
     throw new Error(`AI output truncated (max_tokens=${maxTokens}, finish_reason=length)`);
   }
   const content = choice.message.content;
   return JSON.parse(extractJsonContent(content || '{}'));
 }
 
+/** Qwen3.5-4B 生成案件框架 JSON */
+export async function generateCaseFrameworkWithAI(
+  difficulty: string,
+  theme?: string
+): Promise<Record<string, unknown>> {
+  const serverless = isServerlessEnv();
+  const prompt = serverless
+    ? buildServerlessCasePrompt(difficulty, theme)
+    : buildCaseFrameworkPrompt(difficulty, theme);
+  const maxTokens = serverless ? 3072 : 4096;
+
+  console.log('[AI] Generating case framework...');
+  console.log('[AI] Framework model:', AI_CONFIG.caseFrameworkModel);
+
+  const raw = await callCaseJson(
+    prompt,
+    maxTokens,
+    AI_CONFIG.caseFrameworkModel,
+    '悬疑案件架构师'
+  );
+  return validateFullCase(raw);
+}
+
+/** Qwen3-8B 润色案件框架为完整可玩 JSON */
+export async function polishCaseWithAI(
+  difficulty: string,
+  framework: Record<string, unknown>,
+  theme?: string
+): Promise<Record<string, unknown>> {
+  const serverless = isServerlessEnv();
+  const prompt = buildCasePolishPrompt(difficulty, framework, theme);
+  const maxTokens = serverless ? 4096 : 6144;
+
+  console.log('[AI] Polishing case JSON...');
+  console.log('[AI] Polish model:', AI_CONFIG.casePolishModel);
+
+  const raw = await callCaseJson(
+    prompt,
+    maxTokens,
+    AI_CONFIG.casePolishModel,
+    '悬疑推理编剧'
+  );
+  return validateFullCase(raw);
+}
+
+/** 框架 + 润色两阶段生成（推荐路径） */
+export async function generateCaseWithFrameworkAndPolish(
+  difficulty: string,
+  theme?: string
+): Promise<Record<string, unknown>> {
+  const framework = await generateCaseFrameworkWithAI(difficulty, theme);
+  return polishCaseWithAI(difficulty, framework, theme);
+}
+
+/** Qwen3-8B 一次性生成完整案件（备用） */
+export async function generateFullCaseWithAI(
+  difficulty: string,
+  theme?: string
+): Promise<Record<string, unknown>> {
+  const serverless = isServerlessEnv();
+  const prompt = serverless
+    ? buildServerlessCasePrompt(difficulty, theme)
+    : buildStructuredCasePrompt(difficulty, theme);
+  const maxTokens = serverless ? 4096 : 6144;
+
+  console.log('[AI] Generating full case JSON (single-shot fallback)...');
+  console.log('[AI] Polish model:', AI_CONFIG.casePolishModel);
+  console.log('[AI] Serverless mode:', serverless);
+
+  const raw = await callCaseJson(
+    prompt,
+    maxTokens,
+    AI_CONFIG.casePolishModel
+  );
+  return validateFullCase(raw);
+}
+
 export async function generateCaseBaseWithAI(difficulty: string): Promise<any> {
   console.log('[AI] Generating case base...');
-  const raw = await callCaseJson(buildCaseBasePrompt(difficulty), 1500);
+  const raw = await callCaseJson(
+    buildCaseBasePrompt(difficulty),
+    1500,
+    AI_CONFIG.caseFrameworkModel
+  );
   return validateCaseBase(raw);
 }
 
@@ -230,7 +462,11 @@ export async function generateCaseCastWithAI(
   base: Record<string, unknown>
 ): Promise<any> {
   console.log('[AI] Generating case cast...');
-  const raw = await callCaseJson(buildCaseCastPrompt(difficulty, base), 3000);
+  const raw = await callCaseJson(
+    buildCaseCastPrompt(difficulty, base),
+    3000,
+    AI_CONFIG.caseFrameworkModel
+  );
   return validateCaseCast(raw);
 }
 
@@ -246,7 +482,11 @@ export async function generateCaseDetailsWithAI(
   theme?: string
 ): Promise<any> {
   console.log('[AI] Generating case details...');
-  const raw = await callCaseJson(buildCaseDetailsPrompt(difficulty, core), 2000);
+  const raw = await callCaseJson(
+    buildCaseDetailsPrompt(difficulty, core),
+    2000,
+    AI_CONFIG.caseFrameworkModel
+  );
   return validateCaseDetails(raw);
 }
 
@@ -263,15 +503,15 @@ export async function generateCaseWithAI(difficulty: string, theme?: string): Pr
     console.log('[AI] Difficulty:', difficulty);
     console.log('[AI] Theme:', theme || 'none');
     console.log('[AI] Serverless mode:', serverless);
-    console.log('[AI] Text model:', AI_CONFIG.textModel);
+    console.log('[AI] Case model:', AI_CONFIG.casePolishModel);
 
-    const completion = await client.chat.completions.create({
-      model: AI_CONFIG.textModel,
+    const completion = await jsonClient.chat.completions.create({
+      model: AI_CONFIG.casePolishModel,
       messages: [
         {
           role: 'system',
           content:
-            '你是悬疑推理编剧。必须直接输出合法 JSON，不要输出思考过程或 markdown 代码块。',
+            '/no_think\n你是悬疑推理编剧。必须直接输出合法 JSON，不要输出思考过程或 markdown 代码块。',
         },
         {
           role: 'user',
@@ -280,13 +520,15 @@ export async function generateCaseWithAI(difficulty: string, theme?: string): Pr
       ],
       temperature: serverless ? 0.7 : 0.8,
       frequency_penalty: 0.3,
-      max_tokens: serverless ? 3072 : 8192,
+      max_tokens: serverless ? 3072 : 6144,
       response_format: { type: 'json_object' },
-    });
+      ...getThinkingDisabledExtraBody(AI_CONFIG.casePolishModel),
+    } as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming);
 
     console.log('[AI] Case generation successful');
     const content = completion.choices[0].message.content;
-    return JSON.parse(extractJsonContent(content || '{}'));
+    const raw = JSON.parse(extractJsonContent(content || '{}'));
+    return validateFullCase(raw);
   } catch (error: any) {
     console.error('[AI] Case generation failed:', {
       message: error.message,
@@ -295,6 +537,84 @@ export async function generateCaseWithAI(difficulty: string, theme?: string): Pr
       code: error.code,
     });
     throw error;
+  }
+}
+
+/** Qwen3-8B 根据案件 JSON 批量生成 Kolors 英文绘画 prompt */
+export async function generateImagePromptsWithAI(
+  caseContent: Record<string, unknown>
+): Promise<CaseImagePrompts> {
+  const fallback = buildFallbackImagePrompts(caseContent);
+  try {
+    assertApiKeyConfigured();
+    const caseJson = serializeCaseForPrompt(caseContent as Parameters<typeof serializeCaseForPrompt>[0]);
+    const suspectIds = Array.isArray(caseContent.suspects)
+      ? (caseContent.suspects as Array<{ id?: string }>).map((s, i) => s.id || `s${i + 1}`)
+      : ['s1', 's2', 's3'];
+
+    const prompt = `你是 AI 绘画提示词工程师。根据下方案件 JSON，为 Kwai-Kolors 文生图模型生成英文 prompt。
+
+【案件 JSON】
+${caseJson}
+
+【画风 — 必须严格贴近「名侦探柯南」TV 动画（TMS 赛璐珞）】
+- 细线条、平涂赛璐珞、冷色悬疑光影、2000 年代日本 TV 动画质感
+- 现场图参考柯南剧集里的案发现场背景美术
+- 每条 prompt 末尾必须包含画风标签：${IMAGE_STYLE_SUFFIX}
+
+【人物 — 原创角色，严禁撞脸柯南/工藤新一】
+- 禁止：圆脸大眼镜、红领结、蓝色校服、小学生侦探、工藤新一/柯南标志性发型与五官
+- 必须：original unique character design, distinctive face, unique hairstyle
+- 必须根据 age 写清面部年龄感：${ageAppropriateFaceHint(30)}（按各角色实际 age 替换）
+- 人物 prompt 还必须包含：${IMAGE_CHARACTER_EXTRA}
+
+【负向描述 — 每条 prompt 末尾追加】
+- 人物：${IMAGE_NEGATIVE_HINT}
+- 现场 scene：${IMAGE_SCENE_NEGATIVE_HINT}
+
+【生成要求】
+1. scene：案发现场背景，宽景构图，无人物，与 sceneDescription、deathMethod、setting 一致，柯南动画背景画风
+2. victim：受害者半身肖像，符合 name/gender/age/occupation/background，哀婉气质，成人用成人比例
+3. suspects：为 ${suspectIds.join('、')} 各生成一条半身肖像，体现 personality、occupation、relationship；guarded/suspicious；三人脸型/发型/五官必须互不相同
+
+每条 prompt 80-130 英文词，专注视觉描述（外貌、服装、光线、构图）。
+
+返回 JSON：
+{
+  "scene": "英文 prompt",
+  "victim": "英文 prompt",
+  "suspects": { "${suspectIds[0] || 's1'}": "...", ... }
+}
+
+只输出 JSON。`;
+
+    console.log('[AI] Generating image prompts with Qwen3-8B...');
+    const completion = await jsonClient.chat.completions.create({
+      model: AI_CONFIG.imagePromptModel,
+      messages: [
+        {
+          role: 'system',
+          content:
+            '/no_think\n你是 AI 绘画提示词工程师。画风固定为名侦探柯南 TV 动画赛璐珞风，人物必须是原创面孔、禁止工藤新一/柯南造型。只输出合法 JSON，prompt 为英文。',
+        },
+        { role: 'user', content: prompt },
+      ],
+      temperature: 0.7,
+      max_tokens: 2048,
+      response_format: { type: 'json_object' },
+      ...getThinkingDisabledExtraBody(AI_CONFIG.imagePromptModel),
+    } as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming);
+
+    const content = completion.choices[0].message.content;
+    if (!content) throw new Error('图片 prompt 返回为空');
+
+    const raw = JSON.parse(extractJsonContent(content));
+    const normalized = normalizeImagePrompts(raw, caseContent);
+    console.log('[AI] Image prompts generated successfully');
+    return normalized;
+  } catch (error) {
+    console.warn('[AI] Image prompt generation failed, using fallback:', (error as Error)?.message);
+    return fallback;
   }
 }
 
@@ -388,13 +708,71 @@ async function persistRemoteImage(url: string): Promise<string> {
   }
 }
 
+/** 案件知识库向量嵌入（BAAI/bge-m3） */
+export async function createEmbeddings(inputs: string[]): Promise<number[][]> {
+  assertApiKeyConfigured();
+  if (inputs.length === 0) return [];
+
+  const response = await client.embeddings.create({
+    model: AI_CONFIG.embeddingModel,
+    input: inputs,
+  });
+
+  return response.data
+    .sort((a, b) => a.index - b.index)
+    .map((item) => item.embedding);
+}
+
+function cleanSuspectReply(content: string): string {
+  return content.replace(/[\s\S]*?<\/think>/g, '').trim() || '我不想回答这个问题。';
+}
+
+export function formatSuspectChatError(error: unknown): string {
+  const err = error as { status?: number; code?: string; message?: string };
+  if (err.status === 401) {
+    return '（系统错误：API 密钥无效，请检查 SILICONFLOW_API_KEY）';
+  }
+  if (err.status === 429) {
+    return '（系统错误：API 调用频率过高，请稍后重试）';
+  }
+  if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
+    return '（系统错误：API 请求超时）';
+  }
+  if (err.message) {
+    return `（系统错误：${err.message}）`;
+  }
+  return '抱歉，我现在有点紧张，不知道该说什么...';
+}
+
+/** 流式审讯对话，返回 OpenAI SSE chunk 迭代器 */
+export async function createSuspectChatStream(
+  messages: Array<{ role: string; content: string }>,
+  systemPrompt: string
+) {
+  assertApiKeyConfigured();
+  console.log('[AI] Starting suspect chat stream (GLM roleplay)...');
+  return client.chat.completions.create({
+    model: AI_CONFIG.chatModel,
+    messages: [
+      { role: 'system', content: systemPrompt },
+      ...messages.map((m) => ({
+        role: m.role as 'user' | 'assistant',
+        content: m.content,
+      })),
+    ],
+    temperature: 0.8,
+    max_tokens: 300,
+    stream: true,
+  });
+}
+
 export async function chatWithSuspect(
   messages: Array<{ role: string; content: string }>,
   systemPrompt: string
 ): Promise<string> {
   try {
     assertApiKeyConfigured();
-    console.log('[AI] Starting suspect chat...');
+    console.log('[AI] Starting suspect chat (GLM roleplay)...');
     const completion = await client.chat.completions.create({
       model: AI_CONFIG.chatModel,
       messages: [
@@ -410,27 +788,13 @@ export async function chatWithSuspect(
 
     console.log('[AI] Suspect chat successful');
     const content = completion.choices[0].message.content || '';
-    return content.replace(/[\s\S]*?<\/think>/g, '').trim() || '我不想回答这个问题。';
-  } catch (error: any) {
+    return cleanSuspectReply(content);
+  } catch (error: unknown) {
     console.error('[AI] Chat failed:', {
-      message: error.message,
-      status: error.status,
+      message: (error as Error)?.message,
+      status: (error as { status?: number })?.status,
     });
-
-    if (error.status === 401) {
-      return '（系统错误：API 密钥无效，请检查 SILICONFLOW_API_KEY）';
-    }
-    if (error.status === 429) {
-      return '（系统错误：API 调用频率过高，请稍后重试）';
-    }
-    if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
-      return '（系统错误：API 请求超时）';
-    }
-    if (error.message) {
-      return `（系统错误：${error.message}）`;
-    }
-
-    return '抱歉，我现在有点紧张，不知道该说什么...';
+    return formatSuspectChatError(error);
   }
 }
 
@@ -449,52 +813,49 @@ export async function evaluateDeduction(
     throw new Error('案件真相数据不完整');
   }
 
+  const caseJson = serializeCaseForPrompt(caseData);
   const processText = Array.isArray(process) ? process.join(' → ') : '未知';
-  const suspectNames = Array.isArray(caseData.suspects)
-    ? caseData.suspects.map((s: any) => s.name).filter(Boolean).join('、')
-    : '未知';
 
-  const prompt = `你是专业的推理评分系统。请评估用户的推理。
+  const prompt = `你是专业的推理评分系统。请基于下方「案件设定 JSON」评估玩家的推理过程。
 
-案件嫌疑人名单：${suspectNames}
+【案件设定 JSON】
+${caseJson}
 
-案件真相：
+【标准答案摘要】
 - 凶手：${killer}
 - 手法：${method}
 - 动机：${motive}
 - 作案过程：${processText}
 
-用户推理：
+【玩家推理】
 ${userDeduction}
 
-评分标准（各项独立打分，不要相互影响）：
-1. 凶手身份（0-40分）：用户指认的凶手是否为「${killer}」。指对得 40 分，指错得 0 分。
-2. 作案手法（0-30分）：是否理解作案手法和诡计，可按吻合程度给部分分。
-3. 动机分析（0-20分）：是否找到真实动机，可按吻合程度给部分分。
-4. 逻辑链条（0-10分）：推理过程是否严密。
+【评分标准】（各项独立，互不影响）
+1. 凶手身份（0-40 分）：是否指认「${killer}」。指对 40 分，指错 0 分。
+2. 作案手法（0-30 分）：是否理解手法与诡计，可按吻合程度给部分分。
+3. 动机分析（0-20 分）：是否找到真实动机，可按吻合程度给部分分。
+4. 逻辑链条（0-10 分）：推理是否严密、是否利用 keyClues 与 evidence。
 
-重要：killerCorrect 必须严格等于"用户是否把「${killer}」指认为凶手"。即使手法和动机分析错误，只要凶手指对，killerCorrect 也必须为 true。
+【输出要求】
+- killerCorrect 必须严格等于「玩家是否把 ${killer} 指认为凶手」
+- missedClues 从 truth.keyClues 与 evidence 中列出玩家未提及的关键线索
+- feedback 需解释各项得分依据（约 200 字）
 
-请返回JSON格式：
+返回 JSON：
 {
   "killerCorrect": true 或 false,
-  "breakdown": {
-    "killer": 得分(0-40),
-    "method": 得分(0-30),
-    "motive": 得分(0-20),
-    "logic": 得分(0-10)
-  },
-  "feedback": "详细评价（200字）",
-  "missedClues": ["遗漏的关键线索"]
+  "breakdown": { "killer": 0-40, "method": 0-30, "motive": 0-20, "logic": 0-10 },
+  "feedback": "详细评价",
+  "missedClues": ["遗漏线索"]
 }
 
-只返回JSON，不要其他文字。`;
+只返回 JSON。`;
 
   try {
     assertApiKeyConfigured();
-    console.log('[AI] Starting deduction evaluation...');
+    console.log('[AI] Starting deduction evaluation (DeepSeek-R1)...');
     const completion = await client.chat.completions.create({
-      model: AI_CONFIG.textModel,
+      model: AI_CONFIG.evaluateModel,
       messages: [
         {
           role: 'system',
@@ -506,6 +867,7 @@ ${userDeduction}
         },
       ],
       temperature: 0.3,
+      max_tokens: 2048,
       response_format: { type: 'json_object' },
     });
 

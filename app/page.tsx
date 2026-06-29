@@ -1,45 +1,27 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import { Search, Brain, Clock, Trophy, Sparkles } from 'lucide-react';
+import {
+  Brain,
+  Clock,
+  Trophy,
+  Sparkles,
+  Search,
+  Target,
+  Flame,
+  Skull,
+  ChevronRight,
+} from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import ParticleBackground from '@/components/ParticleBackground';
-import { saveCaseData } from '@/lib/case-store';
+import HomeAtmosphere, { HeroMagnifierIcon } from '@/components/HomeAtmosphere';
 
 export default function HomePage() {
   const router = useRouter();
   const [selectedDifficulty, setSelectedDifficulty] = useState<string>('medium');
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatingStatus, setGeneratingStatus] = useState('');
-
-  function sleep(ms: number) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-  }
-
-  async function pollCaseJob(jobId: string, maxWaitMs = 180000): Promise<any> {
-    const startedAt = Date.now();
-    let dots = 0;
-
-    while (Date.now() - startedAt < maxWaitMs) {
-      dots = (dots + 1) % 4;
-      setGeneratingStatus(`AI 正在生成案件${'.'.repeat(dots + 1)}`);
-
-      const response = await fetch(`/api/generate-case/status?jobId=${encodeURIComponent(jobId)}`);
-      const data = await response.json().catch(() => ({}));
-
-      if (response.ok && data.status === 'done' && data.caseData) {
-        return data.caseData;
-      }
-      if (data.status === 'error') {
-        throw new Error(data.error || '案件生成失败');
-      }
-
-      await sleep(2000);
-    }
-
-    throw new Error('生成超时，请稍后重试');
-  }
 
   const handleStartCase = async () => {
     setIsGenerating(true);
@@ -57,189 +39,249 @@ export default function HomePage() {
         throw new Error(startData.error || `HTTP error! status: ${response.status}`);
       }
 
-      if (startData.sync && startData.caseData) {
-        await saveCaseData(startData.caseData);
-        router.push(`/case/${startData.caseId}`);
-        return;
-      }
-
       if (!startData.jobId) {
         throw new Error('未收到任务 ID');
       }
 
-      const caseData = await pollCaseJob(startData.jobId);
-      await saveCaseData(caseData);
-      router.push(`/case/${caseData.id}`);
-    } catch (error: any) {
+      router.push(
+        `/generating/${startData.jobId}?difficulty=${encodeURIComponent(selectedDifficulty)}`
+      );
+    } catch (error: unknown) {
       console.error('[Frontend] Case generation failed:', error);
-      alert(`生成案件失败：${error.message || '请重试'}`);
-    } finally {
+      alert(`生成案件失败：${(error as Error)?.message || '请重试'}`);
       setIsGenerating(false);
       setGeneratingStatus('');
     }
   };
 
   const difficulties = [
-    { id: 'easy', name: '简单', desc: '适合新手侦探', icon: '🔍', color: 'from-green-600 to-green-800' },
-    { id: 'medium', name: '中等', desc: '考验推理能力', icon: '🎯', color: 'from-yellow-600 to-yellow-800' },
-    { id: 'hard', name: '困难', desc: '高手的挑战', icon: '🔥', color: 'from-orange-600 to-orange-800' },
-    { id: 'expert', name: '专家', desc: '神探的试炼', icon: '💀', color: 'from-red-600 to-red-800' },
+    {
+      id: 'easy',
+      name: '简单',
+      desc: '新手侦探',
+      icon: Search,
+      active: 'border-cyan-400/60 bg-cyan-500/10 shadow-[0_0_28px_rgba(34,211,238,0.2)]',
+      idle: 'border-white/5 hover:border-cyan-400/30',
+      iconColor: 'text-cyan-400',
+    },
+    {
+      id: 'medium',
+      name: '中等',
+      desc: '推理试炼',
+      icon: Target,
+      active: 'border-blue-400/60 bg-blue-500/10 shadow-[0_0_28px_rgba(30,144,255,0.25)]',
+      idle: 'border-white/5 hover:border-blue-400/30',
+      iconColor: 'text-blue-400',
+    },
+    {
+      id: 'hard',
+      name: '困难',
+      desc: '高手对决',
+      icon: Flame,
+      active: 'border-orange-400/50 bg-orange-500/10 shadow-[0_0_28px_rgba(251,146,60,0.2)]',
+      idle: 'border-white/5 hover:border-orange-400/30',
+      iconColor: 'text-orange-400',
+    },
+    {
+      id: 'expert',
+      name: '专家',
+      desc: '神探试炼',
+      icon: Skull,
+      active: 'border-danger-500/50 bg-danger-600/10 shadow-[0_0_28px_rgba(230,57,70,0.2)]',
+      idle: 'border-white/5 hover:border-danger-500/30',
+      iconColor: 'text-danger-500',
+    },
+  ];
+
+  const features = [
+    { icon: Brain, title: 'AI 生成案件', desc: '每一次推理都是独家剧本', num: '01' },
+    { icon: Clock, title: '实时审问', desc: '与嫌疑人心理博弈', num: '02' },
+    { icon: Trophy, title: '智能评分', desc: '专业级推理评估', num: '03' },
   ];
 
   return (
-    <div className="min-h-screen relative overflow-hidden">
+    <div className="min-h-screen relative overflow-hidden page-shell">
+      <HomeAtmosphere />
       <ParticleBackground />
 
-      {/* Hero Section */}
-      <div className="relative z-10 container mx-auto px-4 py-12 md:py-20">
-        <motion.div
-          initial={{ opacity: 0, y: 30 }}
+      {/* 顶栏 */}
+      <header className="relative z-20 border-b border-white/[0.06] bg-[#040d1a]/60 backdrop-blur-md">
+        <div className="container mx-auto px-4 py-3 flex items-center justify-between max-w-6xl">
+          <span className="font-mono text-[10px] tracking-[0.35em] text-blue-400/50 uppercase">
+            Detective OS
+          </span>
+          <span className="font-mono text-[10px] tracking-[0.25em] text-white/25">
+            CASE · GENERATE · SOLVE
+          </span>
+        </div>
+      </header>
+
+      <div className="relative z-10 container mx-auto px-4 py-10 md:py-16 max-w-6xl">
+        {/* Hero */}
+        <motion.section
+          initial={{ opacity: 0, y: 24 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.8 }}
-          className="text-center mb-12 md:mb-16"
+          transition={{ duration: 0.7 }}
+          className="flex flex-col md:flex-row items-center gap-10 md:gap-14 mb-14 md:mb-20"
         >
-          <motion.div
-            initial={{ scale: 0, rotate: -30 }}
-            animate={{ scale: 1, rotate: 0 }}
-            transition={{ delay: 0.2, type: 'spring', stiffness: 180 }}
-            className="inline-block mb-4 md:mb-6"
-          >
-            <Search className="w-16 h-16 md:w-24 md:h-24 text-blood-500 mx-auto animate-pulse-slow" />
-          </motion.div>
+          <div className="flex-1 text-center md:text-left min-w-0">
+            <p className="font-mono text-[10px] md:text-xs tracking-[0.4em] text-blue-400/55 mb-5 uppercase">
+              Immersive Mystery · AI Powered
+            </p>
+            <h1 className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-black conan-title tracking-wide leading-[1.1] mb-5">
+              AI 推理侦探
+            </h1>
+            <p className="text-base md:text-xl text-blue-200/80 font-medium mb-2 tracking-wide">
+              真相，永远只有一个
+            </p>
+            <p className="text-sm md:text-base text-gray-500 max-w-lg mx-auto md:mx-0 leading-relaxed">
+              实时生成的独家悬疑案件 · 审问嫌疑人 · 拼凑线索 · 揭开迷雾
+            </p>
 
-          <h1 className="text-4xl md:text-7xl font-black mb-4 md:mb-6 conan-title tracking-wider">
-            AI 推理侦探
-          </h1>
-          <p className="text-lg md:text-2xl text-blue-300 mb-3 md:mb-4 font-medium">
-            — 真相永远只有一个 —
-          </p>
-          <p className="text-sm md:text-lg text-gray-400 max-w-2xl mx-auto px-4">
-            每个案件都是 AI 实时生成的独家悬疑故事<br />
-            挑战你的推理直觉，揭开层层迷雾
-          </p>
-        </motion.div>
+            <div className="mt-8 flex flex-wrap items-center justify-center md:justify-start gap-3">
+              {['独家剧本', '知识库 RAG', '沉浸式体验'].map((tag) => (
+                <span
+                  key={tag}
+                  className="px-3 py-1 rounded-full text-[10px] font-mono tracking-wider border border-blue-500/20 text-blue-300/60 bg-blue-500/5"
+                >
+                  {tag}
+                </span>
+              ))}
+            </div>
+          </div>
 
-        {/* 特色功能 */}
+          <HeroMagnifierIcon />
+        </motion.section>
+
+        {/* 功能卡片 */}
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          transition={{ delay: 0.4 }}
-          className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6 mb-12 md:mb-16 max-w-5xl mx-auto px-4"
+          transition={{ delay: 0.25 }}
+          className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-14 md:mb-16"
         >
-          {[
-            { icon: Brain, title: 'AI 生成案件', desc: '无限可能的推理故事', num: '01' },
-            { icon: Clock, title: '实时审问', desc: '与嫌疑人智能对话', num: '02' },
-            { icon: Trophy, title: '智能评分', desc: '专业的推理评估系统', num: '03' },
-          ].map((feature, i) => (
+          {features.map((feature, i) => (
             <motion.div
-              key={i}
-              initial={{ opacity: 0, y: 20 }}
+              key={feature.num}
+              initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.6 + i * 0.1 }}
-              className="relative glass p-5 md:p-7 rounded-xl card-hover text-center detective-border overflow-hidden"
+              transition={{ delay: 0.35 + i * 0.08 }}
+              className="group relative rounded-2xl p-5 md:p-6 overflow-hidden border border-white/[0.06] bg-white/[0.02] backdrop-blur-sm hover:border-blue-500/25 transition-all duration-500"
             >
-              <span className="absolute top-3 right-4 font-mono text-xs text-blue-500/30">{feature.num}</span>
-              <div className="w-14 h-14 md:w-16 md:h-16 mx-auto mb-4 rounded-xl bg-gradient-to-br from-blood-600/30 to-blood-500/10 flex items-center justify-center border border-blue-500/20">
-                <feature.icon className="w-7 h-7 md:w-8 md:h-8 text-blood-500" />
+              <div className="absolute top-0 left-0 w-px h-full bg-gradient-to-b from-transparent via-blue-500/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+              <div className="absolute inset-0 bg-gradient-to-br from-blue-500/[0.04] to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+              <span className="absolute top-4 right-5 font-mono text-[10px] text-white/15">
+                {feature.num}
+              </span>
+              <div className="relative flex items-start gap-4">
+                <div className="w-11 h-11 rounded-xl flex items-center justify-center border border-blue-500/20 bg-blue-500/5 shrink-0">
+                  <feature.icon className="w-5 h-5 text-blue-400" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white/95 mb-1">{feature.title}</h3>
+                  <p className="text-xs text-gray-500 leading-relaxed">{feature.desc}</p>
+                </div>
               </div>
-              <h3 className="text-base md:text-lg font-bold mb-1.5 tracking-wide">{feature.title}</h3>
-              <p className="text-xs md:text-sm text-gray-400">{feature.desc}</p>
             </motion.div>
           ))}
         </motion.div>
 
         {/* 难度选择 */}
-        <motion.div
-          initial={{ opacity: 0, y: 30 }}
+        <motion.section
+          initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.8 }}
-          className="max-w-4xl mx-auto px-4"
+          transition={{ delay: 0.45 }}
+          className="max-w-3xl mx-auto"
         >
-          <h2 className="text-2xl md:text-3xl font-bold text-center mb-6 md:mb-8 flex items-center justify-center gap-3">
-            <Sparkles className="w-6 h-6 md:w-8 md:h-8 text-blue-400" />
-            <span className="text-glow">选择案件难度</span>
-            <Sparkles className="w-6 h-6 md:w-8 md:h-8 text-blue-400" />
-          </h2>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-8 md:mb-12">
-            {difficulties.map((diff) => (
-              <motion.button
-                key={diff.id}
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={() => setSelectedDifficulty(diff.id)}
-                className={`relative p-4 md:p-6 rounded-xl border-2 transition-all overflow-hidden ${
-                  selectedDifficulty === diff.id
-                    ? 'border-blood-500 bg-gradient-to-br ' + diff.color + ' shadow-[0_0_30px_rgba(30,144,255,0.3)]'
-                    : 'border-blue-900/40 glass hover:border-blue-500/40 hover:shadow-[0_0_15px_rgba(30,144,255,0.1)]'
-                }`}
-              >
-                <div className="text-3xl md:text-4xl mb-2">{diff.icon}</div>
-                <div className="text-lg md:text-2xl font-bold mb-1 md:mb-2">{diff.name}</div>
-                <div className="text-xs md:text-sm text-gray-300">{diff.desc}</div>
-              </motion.button>
-            ))}
+          <div className="flex items-center justify-center gap-3 mb-8">
+            <div className="h-px w-12 bg-gradient-to-r from-transparent to-blue-500/40" />
+            <h2 className="text-sm md:text-base font-bold tracking-[0.3em] text-blue-300/80 uppercase flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-blue-400/70" />
+              选择难度
+            </h2>
+            <div className="h-px w-12 bg-gradient-to-l from-transparent to-blue-500/40" />
           </div>
 
-          {/* 开始按钮 */}
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 1 }}
-            className="text-center"
-          >
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-10">
+            {difficulties.map((diff) => {
+              const selected = selectedDifficulty === diff.id;
+              const Icon = diff.icon;
+              return (
+                <motion.button
+                  key={diff.id}
+                  type="button"
+                  whileTap={{ scale: 0.97 }}
+                  onClick={() => setSelectedDifficulty(diff.id)}
+                  className={`relative rounded-2xl p-4 md:p-5 text-left transition-all duration-300 border backdrop-blur-sm ${
+                    selected ? diff.active : diff.idle
+                  }`}
+                >
+                  <Icon
+                    className={`w-5 h-5 mb-3 ${selected ? diff.iconColor : 'text-gray-500'}`}
+                  />
+                  <div className="text-lg font-bold text-white/95">{diff.name}</div>
+                  <div className="text-[11px] text-gray-500 mt-0.5">{diff.desc}</div>
+                  {selected && (
+                    <motion.div
+                      layoutId="diff-ring"
+                      className="absolute inset-0 rounded-2xl ring-1 ring-inset ring-white/10 pointer-events-none"
+                    />
+                  )}
+                </motion.button>
+              );
+            })}
+          </div>
+
+          {/* CTA */}
+          <div className="text-center">
             <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
+              type="button"
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
               onClick={handleStartCase}
               disabled={isGenerating}
-              className="relative w-full md:w-auto px-10 md:px-14 py-3.5 md:py-4 rounded-xl text-lg md:text-xl font-black tracking-wider overflow-hidden group disabled:opacity-50 disabled:cursor-not-allowed"
+              className="group relative w-full md:w-auto inline-flex items-center justify-center gap-3 px-10 md:px-12 py-4 rounded-2xl text-base md:text-lg font-bold tracking-wide overflow-hidden disabled:opacity-50 disabled:cursor-not-allowed"
               style={{
-                background: 'linear-gradient(135deg, #0066cc 0%, #1e90ff 50%, #00d4ff 100%)',
-                boxShadow: '0 0 40px rgba(30,144,255,0.45), 0 4px 20px rgba(0,0,0,0.4)',
+                background: 'linear-gradient(135deg, #0044aa 0%, #1e90ff 45%, #00c8ff 100%)',
+                boxShadow:
+                  '0 0 48px rgba(30,144,255,0.35), 0 8px 32px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.15)',
               }}
             >
-              {/* 扫光 */}
-              <span className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-700 pointer-events-none" />
+              <span
+                className="absolute inset-0 bg-gradient-to-r from-transparent via-white/15 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-700"
+              />
               {isGenerating ? (
-                <span className="relative flex items-center justify-center gap-3">
-                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  {generatingStatus || 'AI 正在分析案情…'}
-                </span>
+                <>
+                  <div className="w-5 h-5 border-2 border-white/80 border-t-transparent rounded-full animate-spin" />
+                  <span>{generatingStatus || 'AI 正在分析案情…'}</span>
+                </>
               ) : (
-                <span className="relative flex items-center justify-center gap-2">
+                <>
                   <Search className="w-5 h-5" />
-                  开始推理
-                  <Sparkles className="w-4 h-4" />
-                </span>
+                  <span>开始推理</span>
+                  <ChevronRight className="w-5 h-5 group-hover:translate-x-0.5 transition-transform" />
+                </>
               )}
             </motion.button>
-            <p className="mt-4 text-xs md:text-sm text-gray-500">
-              提交后 AI 在后台生成，约 30–90 秒，请保持页面打开
+            <p className="mt-4 text-[11px] text-gray-600 font-mono tracking-wider">
+              生成过程逐步呈现 · 受害者 → 嫌疑人 → 卷宗
             </p>
-          </motion.div>
-        </motion.div>
+          </div>
+        </motion.section>
 
-        {/* 底部装饰 */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 1.2 }}
-          className="mt-12 md:mt-20 text-center text-gray-600 text-xs md:text-sm px-4"
-        >
-          <p className="text-blue-900/60">每个案件 AI 实时生成，保证独一无二的体验</p>
-          <p className="mt-2 text-gray-700">Powered by SiliconFlow · Detective Mode ON 🔍</p>
-        </motion.div>
+        <footer className="mt-16 md:mt-24 text-center space-y-1">
+          <p className="text-[10px] font-mono text-white/20 tracking-[0.2em]">
+            POWERED BY SILICONFLOW
+          </p>
+          <p className="text-[10px] text-white/10">每个案件独一无二 · 永不重复</p>
+        </footer>
       </div>
 
-      {/* 顶/底扫光线 */}
-      <div className="fixed top-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-blue-500 to-transparent opacity-60" />
-      <div className="fixed bottom-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-blue-500 to-transparent opacity-60" />
-
-      {/* 角落侦探方框装饰 */}
-      <div className="fixed top-0 left-0 w-20 h-20 md:w-32 md:h-32 border-l-2 border-t-2 border-blue-500/30 rounded-tl-lg" />
-      <div className="fixed top-0 right-0 w-20 h-20 md:w-32 md:h-32 border-r-2 border-t-2 border-blue-500/30 rounded-tr-lg" />
-      <div className="fixed bottom-0 left-0 w-20 h-20 md:w-32 md:h-32 border-l-2 border-b-2 border-blue-500/30 rounded-bl-lg" />
-      <div className="fixed bottom-0 right-0 w-20 h-20 md:w-32 md:h-32 border-r-2 border-b-2 border-blue-500/30 rounded-br-lg" />
+      {/* 角落取景框 */}
+      <div className="fixed top-12 left-3 w-12 h-12 md:w-16 md:h-16 border-l border-t border-blue-500/20 rounded-tl-lg pointer-events-none z-10" />
+      <div className="fixed top-12 right-3 w-12 h-12 md:w-16 md:h-16 border-r border-t border-blue-500/20 rounded-tr-lg pointer-events-none z-10" />
+      <div className="fixed bottom-3 left-3 w-12 h-12 md:w-16 md:h-16 border-l border-b border-blue-500/20 rounded-bl-lg pointer-events-none z-10" />
+      <div className="fixed bottom-3 right-3 w-12 h-12 md:w-16 md:h-16 border-r border-b border-blue-500/20 rounded-br-lg pointer-events-none z-10" />
     </div>
   );
 }

@@ -116,7 +116,7 @@ export default function InvestigatePage() {
   ];
 
   return (
-    <div className="min-h-screen relative bg-dark-900">
+    <div className="min-h-screen relative bg-dark-900 page-shell overflow-x-hidden">
       <ParticleBackground />
 
       {/* 四角装饰 */}

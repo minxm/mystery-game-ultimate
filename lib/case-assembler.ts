@@ -1,5 +1,8 @@
-import { generateImageWithRetry } from '@/lib/ai';
+import { generateImagePromptsWithAI, generateImageWithRetry } from '@/lib/ai';
 import { shouldGenerateImages } from '@/lib/ai-config';
+import { patchCaseJob } from '@/lib/case-job-store';
+import { buildFallbackImagePrompts } from '@/lib/image-prompt';
+import { normalizeTruthShape } from './case-schema';
 import { CaseData } from '@/lib/types';
 import { generateId } from '@/lib/utils';
 import { getAvatarPlaceholder, getScenePlaceholder } from '@/lib/placeholder';
@@ -32,22 +35,6 @@ async function runWithConcurrency<T>(
     Array.from({ length: Math.min(limit, tasks.length) }, () => worker())
   );
   return results;
-}
-
-function buildScenePrompt(setting: string, deathMethod: string, description: string) {
-  return `anime background art, mystery crime scene, ${setting}, ${description.slice(0, 120)}, ${deathMethod}, Detective Conan anime style, cel-shaded environment illustration, dark navy blue atmosphere, dramatic blue and purple lighting, wide angle view, Japanese mystery anime aesthetic, high quality 2D animation art, no text, no watermark, no characters`;
-}
-
-function buildPortraitPrompt(
-  name: string,
-  gender: string | undefined,
-  age: number,
-  occupation: string,
-  personality: string
-) {
-  const genderWord = gender === 'female' ? 'female' : 'male';
-  const genderJP = gender === 'female' ? 'woman' : 'man';
-  return `anime character portrait, ${genderJP}, ${age} years old, ${occupation}, ${personality || 'neutral'} expression, Detective Conan anime art style, cel-shaded, clean 2D lineart, dramatic side lighting, dark navy background, Japanese mystery anime, vibrant colors, half body shot, clearly ${genderWord} appearance, no text, no watermark`;
 }
 
 export function buildCaseData(difficulty: string, caseContent: any): CaseData {
@@ -87,10 +74,104 @@ export function buildCaseData(difficulty: string, caseContent: any): CaseData {
       id: item.id || `e${index + 1}`,
     })),
     timeline: caseContent.timeline || [],
-    truth: caseContent.truth,
+    truth: normalizeTruthShape(caseContent.truth),
     redHerrings: caseContent.redHerrings || [],
     createdAt: Date.now(),
   };
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** 渐进式生图并推送 job 阶段：受害者图 → 嫌疑人图 → 文本 → 现场图 → 完成 */
+export async function buildCaseDataWithImagesProgressive(
+  difficulty: string,
+  caseContent: any,
+  jobId: string
+): Promise<CaseData> {
+  const caseData = buildCaseData(difficulty, caseContent);
+
+  await patchCaseJob(jobId, {
+    stage: 'pending',
+    progressMessage: 'AI 正在构建案件框架…',
+    caseData,
+  });
+
+  const advanceStage = async (
+    stage: 'victim_ready' | 'suspects_ready' | 'text_ready',
+    message: string,
+    data: CaseData
+  ) => {
+    await patchCaseJob(jobId, { stage, progressMessage: message, caseData: { ...data } });
+  };
+
+  if (shouldGenerateImages()) {
+    const suspects = Array.isArray(caseContent?.suspects) ? caseContent.suspects : [];
+    console.log('[CaseAssembler] Progressive: victim → suspects → text → scene');
+
+    const fallbackPrompts = buildFallbackImagePrompts(caseContent);
+    let imagePrompts = fallbackPrompts;
+    try {
+      const aiPrompts = await Promise.race([
+        generateImagePromptsWithAI(caseContent),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('image prompt timeout')), 30000)
+        ),
+      ]);
+      imagePrompts = aiPrompts;
+    } catch (error) {
+      console.warn('[CaseAssembler] Fallback image prompts:', (error as Error)?.message);
+    }
+
+    await patchCaseJob(jobId, { progressMessage: '正在绘制受害者肖像…' });
+    const victimImageUrl = await generateImageWithRetry(imagePrompts.victim);
+    caseData.victim.imageUrl = victimImageUrl || caseData.victim.imageUrl;
+    await advanceStage('victim_ready', '受害者档案已锁定', caseData);
+
+    await patchCaseJob(jobId, { progressMessage: '正在绘制嫌疑人肖像…' });
+    const suspectImageById: Record<string, string> = {};
+    for (let i = 0; i < suspects.length; i++) {
+      const suspect = suspects[i] as { id?: string };
+      const id = String(suspect.id || `s${i + 1}`);
+      const prompt = imagePrompts.suspects[id];
+      if (prompt) {
+        const url = await generateImageWithRetry(prompt);
+        if (url) suspectImageById[id] = url;
+      }
+      caseData.suspects = caseData.suspects.map((s) => ({
+        ...s,
+        imageUrl: suspectImageById[s.id] || s.imageUrl,
+      }));
+      await patchCaseJob(jobId, {
+        progressMessage: `嫌疑人肖像 ${i + 1}/${suspects.length}…`,
+        caseData: { ...caseData },
+      });
+    }
+    await advanceStage('suspects_ready', '嫌疑人已全部登场', caseData);
+
+    await advanceStage('text_ready', '案件卷宗整理完成', caseData);
+
+    await patchCaseJob(jobId, { progressMessage: '正在还原案发现场…' });
+    const sceneImageUrl = await generateImageWithRetry(imagePrompts.scene);
+    caseData.sceneImageUrl = sceneImageUrl || caseData.sceneImageUrl;
+  } else {
+    await sleep(400);
+    await advanceStage('victim_ready', '受害者档案已锁定', caseData);
+    await sleep(400);
+    await advanceStage('suspects_ready', '嫌疑人已全部登场', caseData);
+    await sleep(400);
+    await advanceStage('text_ready', '案件卷宗整理完成', caseData);
+  }
+
+  await patchCaseJob(jobId, {
+    status: 'done',
+    stage: 'done',
+    progressMessage: '取证完成',
+    caseData: { ...caseData },
+  });
+
+  return caseData;
 }
 
 export async function buildCaseDataWithImages(
@@ -103,36 +184,34 @@ export async function buildCaseDataWithImages(
 
   if (shouldGenerateImages()) {
     const suspects = Array.isArray(caseContent?.suspects) ? caseContent.suspects : [];
-    console.log('[CaseAssembler] Generating AI images (scene + victim + suspects)...');
+    console.log('[CaseAssembler] Generating image prompts (Qwen3-8B) + images (Kolors)...');
 
-    const scenePrompt = buildScenePrompt(
-      caseContent.setting,
-      caseContent.deathMethod,
-      caseContent.sceneDescription
-    );
-    const victimPrompt = buildPortraitPrompt(
-      caseContent.victim.name,
-      caseContent.victim.gender,
-      caseContent.victim.age,
-      caseContent.victim.occupation,
-      'victim'
-    );
+    // 图片 prompt 用 Qwen 增强；失败或超时则立即用本地模板，不阻塞 Kolors 生图
+    const fallbackPrompts = buildFallbackImagePrompts(caseContent);
+    let imagePrompts = fallbackPrompts;
+    try {
+      const aiPrompts = await Promise.race([
+        generateImagePromptsWithAI(caseContent),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('image prompt generation timed out')), 30000)
+        ),
+      ]);
+      imagePrompts = aiPrompts;
+    } catch (error) {
+      console.warn(
+        '[CaseAssembler] Using fallback image prompts:',
+        (error as Error)?.message
+      );
+    }
 
     // 现场 + 受害者串行，嫌疑人最多 2 路并发，降低限流概率
-    sceneImageUrl = await generateImageWithRetry(scenePrompt);
-    victimImageUrl = await generateImageWithRetry(victimPrompt);
+    sceneImageUrl = await generateImageWithRetry(imagePrompts.scene);
+    victimImageUrl = await generateImageWithRetry(imagePrompts.victim);
 
     const suspectTasks = suspects.map((suspect: any, index: number) => async (): Promise<{ id: string; url: string }> => {
       const id = String(suspect.id || `s${index + 1}`);
-      const url = await generateImageWithRetry(
-        buildPortraitPrompt(
-          suspect.name,
-          suspect.gender,
-          suspect.age,
-          suspect.occupation,
-          suspect.personality
-        )
-      );
+      const prompt = imagePrompts.suspects[id];
+      const url = prompt ? await generateImageWithRetry(prompt) : '';
       return { id, url };
     });
 

@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { CaseData } from '@/lib/types';
 import { storage, getScoreRating, formatTime, loadCaseData } from '@/lib/utils';
+import { normalizeTruthShape } from '@/lib/case-schema';
 import ParticleBackground from '@/components/ParticleBackground';
 
 interface Evaluation {
@@ -84,7 +85,26 @@ export default function ResultPage() {
     })();
 
     const evalData = sessionStorage.getItem('evaluation');
-    if (evalData) setEvaluation(JSON.parse(evalData));
+    if (evalData) {
+      try {
+        const parsed = JSON.parse(evalData) as Partial<Evaluation>;
+        setEvaluation({
+          score: Number(parsed.score) || 0,
+          breakdown: {
+            killer: Number(parsed.breakdown?.killer) || 0,
+            method: Number(parsed.breakdown?.method) || 0,
+            motive: Number(parsed.breakdown?.motive) || 0,
+            logic: Number(parsed.breakdown?.logic) || 0,
+          },
+          feedback: parsed.feedback ?? '',
+          rating: parsed.rating ?? '',
+          killerCorrect: parsed.killerCorrect,
+          missedClues: Array.isArray(parsed.missedClues) ? parsed.missedClues : [],
+        });
+      } catch {
+        /* ignore corrupt session data */
+      }
+    }
     const progress = storage.getProgress(caseId);
     if (progress?.endTime) setTimeSpent(Math.floor((progress.endTime - progress.startTime) / 1000));
     setTimeout(() => setShown(true), 200);
@@ -109,6 +129,7 @@ export default function ResultPage() {
   }
 
   const scoreInfo = getScoreRating(evaluation.score, evaluation.killerCorrect);
+  const truth = normalizeTruthShape(caseData.truth);
 
   const getBarColor = (score: number, max: number) => {
     const ratio = score / max;
@@ -278,9 +299,9 @@ export default function ResultPage() {
               >
                 <div className="px-6 pb-7 space-y-5 border-t border-blue-900/30">
                   {[
-                    { label:'真凶', value: caseData.truth.killer },
-                    { label:'手法', value: caseData.truth.method },
-                    { label:'动机', value: caseData.truth.motive },
+                    { label: '真凶', value: truth.killer },
+                    { label: '手法', value: truth.method },
+                    { label: '动机', value: truth.motive },
                   ].map(({ label, value }) => (
                     <div key={label} className="pt-5">
                       <p className="text-xs font-mono text-blue-400/50 tracking-widest mb-1">{label.toUpperCase()}</p>
@@ -291,9 +312,9 @@ export default function ResultPage() {
                   <div className="pt-5">
                     <p className="text-xs font-mono text-blue-400/50 tracking-widest mb-3">PROCESS</p>
                     <div className="space-y-3">
-                      {caseData.truth.process.map((step, i) => (
+                      {truth.process.map((step, i) => (
                         <motion.div
-                          key={i}
+                          key={`${i}-${step.slice(0, 24)}`}
                           initial={{ opacity:0, x:-16 }} animate={{ opacity:1, x:0 }} transition={{ delay: i*0.08 }}
                           className="flex items-start gap-3"
                         >
@@ -309,8 +330,8 @@ export default function ResultPage() {
                   <div className="pt-5">
                     <p className="text-xs font-mono text-blue-400/50 tracking-widest mb-3">KEY CLUES</p>
                     <ul className="space-y-2">
-                      {caseData.truth.keyClues.map((clue, i) => (
-                        <li key={i} className="flex items-start gap-2 text-gray-400 text-sm">
+                      {truth.keyClues.map((clue, i) => (
+                        <li key={`${i}-${clue.slice(0, 24)}`} className="flex items-start gap-2 text-gray-400 text-sm">
                           <span className="text-clue-400 mt-0.5">◆</span> {clue}
                         </li>
                       ))}
