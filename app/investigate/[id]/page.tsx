@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { CaseData, Evidence, Suspect } from '@/lib/types';
 import { storage, loadCaseData, getSuspectId } from '@/lib/utils';
+import { syncProgress, syncEvaluation } from '@/lib/cloud-sync';
 import { getAvatarPlaceholder } from '@/lib/placeholder';
 import ParticleBackground from '@/components/ParticleBackground';
 import Image from 'next/image';
@@ -64,6 +65,14 @@ export default function InvestigatePage() {
       setDiscoveredEvidence(newDiscovered);
       const progress = storage.getProgress(caseData!.id);
       if (progress) storage.saveProgress({ ...progress, discoveredEvidence: newDiscovered });
+      else storage.saveProgress({
+        caseId: caseData!.id,
+        discoveredEvidence: newDiscovered,
+        interrogatedSuspects,
+        notes: '',
+        startTime: Date.now(),
+      });
+      void syncProgress(storage.getProgress(caseData!.id)!);
     }
   };
 
@@ -90,8 +99,21 @@ export default function InvestigatePage() {
       const data = await response.json();
       if (data.success) {
         const progress = storage.getProgress(caseData!.id);
-        if (progress) storage.saveProgress({ ...progress, endTime: Date.now(), score: data.evaluation.score });
+        const updated = progress
+          ? { ...progress, endTime: Date.now(), score: data.evaluation.score }
+          : {
+              caseId: caseData!.id,
+              discoveredEvidence,
+              interrogatedSuspects,
+              notes: '',
+              startTime: Date.now(),
+              endTime: Date.now(),
+              score: data.evaluation.score,
+            };
+        storage.saveProgress(updated);
         storage.updateStats(data.evaluation.score);
+        void syncProgress(updated);
+        void syncEvaluation(caseData!.id, data.evaluation, deduction);
         sessionStorage.setItem('evaluation', JSON.stringify(data.evaluation));
         router.push(`/result/${caseData?.id}`);
       } else { alert(data.error || '评分失败，请重试'); }

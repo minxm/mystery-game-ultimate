@@ -16,6 +16,9 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import ParticleBackground from '@/components/ParticleBackground';
 import HomeAtmosphere, { HeroMagnifierIcon } from '@/components/HomeAtmosphere';
+import AuthButton from '@/components/AuthButton';
+import OnlinePresence from '@/components/OnlinePresence';
+import Link from 'next/link';
 
 export default function HomePage() {
   const router = useRouter();
@@ -110,9 +113,16 @@ export default function HomePage() {
           <span className="font-mono text-[10px] tracking-[0.35em] text-blue-400/50 uppercase">
             Detective OS
           </span>
-          <span className="font-mono text-[10px] tracking-[0.25em] text-white/25">
-            CASE · GENERATE · SOLVE
-          </span>
+          <div className="flex items-center gap-4">
+            <OnlinePresence />
+            <Link
+              href="/leaderboard"
+              className="text-[10px] font-mono tracking-wider text-white/40 hover:text-blue-300/80 transition-colors"
+            >
+              排行榜
+            </Link>
+            <AuthButton />
+          </div>
         </div>
       </header>
 

@@ -9,6 +9,7 @@ import {
 import { generateId } from '@/lib/utils';
 import { setCaseJob } from '@/lib/case-job-store';
 import { createFallbackCase } from '@/lib/fallback-case';
+import { getSessionUserId } from '@/lib/supabase/server';
 
 export const maxDuration = 60;
 
@@ -52,13 +53,14 @@ async function generateCaseWithRetry<T>(label: string, fn: () => Promise<T>): Pr
 async function triggerBackgroundGeneration(
   origin: string,
   jobId: string,
-  difficulty: string
+  difficulty: string,
+  userId?: string | null
 ): Promise<void> {
   if (isServerlessEnv()) {
     const triggerRes = await fetch(`${origin}/.netlify/functions/generate-case-background`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ jobId, difficulty }),
+      body: JSON.stringify({ jobId, difficulty, userId }),
     }).catch((e: unknown) => {
       console.error('[API] Trigger Netlify background failed:', (e as Error)?.message);
       return null;
@@ -77,7 +79,7 @@ async function triggerBackgroundGeneration(
   void fetch(`${origin}/api/generate-case/worker`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jobId, difficulty }),
+    body: JSON.stringify({ jobId, difficulty, userId }),
   }).catch((e: unknown) => {
     console.error('[API] Local worker trigger failed:', (e as Error)?.message);
   });
@@ -93,9 +95,11 @@ export async function POST(request: NextRequest) {
 
     if (phase === 'start') {
       const jobId = generateId();
-      await setCaseJob(jobId, { status: 'pending', stage: 'pending', createdAt: Date.now() });
+      const userId = await getSessionUserId().catch(() => null);
+      const jobMeta = { userId, difficulty };
+      await setCaseJob(jobId, { status: 'pending', stage: 'pending', createdAt: Date.now() }, jobMeta);
 
-      await triggerBackgroundGeneration(request.nextUrl.origin, jobId, difficulty);
+      await triggerBackgroundGeneration(request.nextUrl.origin, jobId, difficulty, userId);
 
       return NextResponse.json({ success: true, jobId });
     }

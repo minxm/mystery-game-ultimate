@@ -50,17 +50,37 @@ function isNetlifyBlobsAvailable(): boolean {
   );
 }
 
-export async function setCaseJob(jobId: string, record: CaseJobRecord): Promise<void> {
+function isSupabaseJobsAvailable(): boolean {
+  return (
+    typeof process.env.NEXT_PUBLIC_SUPABASE_URL === 'string' &&
+    typeof process.env.SUPABASE_SERVICE_ROLE_KEY === 'string'
+  );
+}
+
+export async function setCaseJob(
+  jobId: string,
+  record: CaseJobRecord,
+  meta?: { userId?: string | null; difficulty?: string }
+): Promise<void> {
+  if (isSupabaseJobsAvailable()) {
+    const { supabaseSetCaseJob } = await import('@/lib/supabase/jobs');
+    await supabaseSetCaseJob(jobId, record, meta?.userId, meta?.difficulty);
+  }
   if (isNetlifyBlobsAvailable()) {
     const { getStore } = await import('@netlify/blobs');
     const store = getStore('case-jobs');
     await store.setJSON(jobId, record);
-  } else {
+  } else if (!isSupabaseJobsAvailable()) {
     getMemoryStore().set(jobId, record);
   }
 }
 
 export async function getCaseJob(jobId: string): Promise<CaseJobRecord | null> {
+  if (isSupabaseJobsAvailable()) {
+    const { supabaseGetCaseJob } = await import('@/lib/supabase/jobs');
+    const fromDb = await supabaseGetCaseJob(jobId);
+    if (fromDb) return fromDb;
+  }
   if (isNetlifyBlobsAvailable()) {
     const { getStore } = await import('@netlify/blobs');
     const store = getStore('case-jobs');
@@ -71,7 +91,8 @@ export async function getCaseJob(jobId: string): Promise<CaseJobRecord | null> {
 
 export async function patchCaseJob(
   jobId: string,
-  patch: Partial<CaseJobRecord>
+  patch: Partial<CaseJobRecord>,
+  meta?: { userId?: string | null; difficulty?: string }
 ): Promise<void> {
   const current = await getCaseJob(jobId);
   if (!current) return;
@@ -79,5 +100,5 @@ export async function patchCaseJob(
     ...current,
     ...patch,
     caseData: patch.caseData ?? current.caseData,
-  });
+  }, meta);
 }

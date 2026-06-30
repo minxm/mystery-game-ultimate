@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Skull, Users, FileText, Sparkles } from 'lucide-react';
@@ -10,6 +10,8 @@ import { isStageAtLeast, CaseJobStage } from '@/lib/case-job-store';
 import { CaseData } from '@/lib/types';
 import { saveCaseData } from '@/lib/case-store';
 import { getAvatarPlaceholder } from '@/lib/placeholder';
+import { createClientSafe } from '@/lib/supabase/client';
+import { isSupabaseConfigured } from '@/lib/supabase/env';
 
 const STAGE_LABELS: Record<CaseJobStage, string> = {
   pending: '正在分析案情…',
@@ -46,6 +48,45 @@ export default function GeneratingPage() {
     let cancelled = false;
     const startedAt = Date.now();
     const maxWaitMs = 720000;
+
+    // Supabase Realtime 订阅（配置后替代纯轮询）
+    let cleanupRealtime: (() => void) | undefined;
+    if (isSupabaseConfigured()) {
+      const supabase = createClientSafe();
+      if (supabase) {
+        const channel = supabase
+          .channel(`job-${jobId}`)
+          .on(
+            'postgres_changes',
+            {
+              event: 'UPDATE',
+              schema: 'public',
+              table: 'case_generation_jobs',
+              filter: `job_id=eq.${jobId}`,
+            },
+            (payload) => {
+              const row = payload.new as {
+                status: string;
+                stage: CaseJobStage;
+                case_data: CaseData | null;
+                error: string | null;
+                progress_message: string | null;
+              };
+              if (row.case_data) setCaseData(row.case_data);
+              if (row.stage) setStage(row.stage);
+              if (row.progress_message) setMessage(row.progress_message);
+              if (row.status === 'error') setError(row.error || '案件生成失败');
+              if (row.status === 'done' && row.case_data && !cancelled) {
+                void finishCase(row.case_data);
+              }
+            }
+          )
+          .subscribe();
+        cleanupRealtime = () => {
+          void supabase.removeChannel(channel);
+        };
+      }
+    }
 
     async function poll() {
       while (!cancelled && Date.now() - startedAt < maxWaitMs) {
@@ -94,6 +135,7 @@ export default function GeneratingPage() {
     poll();
     return () => {
       cancelled = true;
+      cleanupRealtime?.();
     };
   }, [jobId, finishCase]);
 

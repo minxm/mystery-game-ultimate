@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, Send, Info, X } from 'lucide-react';
 import { CaseData, Suspect, InterrogationMessage } from '@/lib/types';
 import { storage, loadCaseData, findSuspectByParam, getSuspectId } from '@/lib/utils';
+import { syncInterrogation } from '@/lib/cloud-sync';
 import { serializeCaseForPrompt } from '@/lib/case-prompt';
 import { getAvatarPlaceholder } from '@/lib/placeholder';
 import ParticleBackground from '@/components/ParticleBackground';
@@ -225,6 +226,7 @@ export default function InterrogateClient() {
           m.timestamp === streamTimestamp ? { ...m, content: replyContent } : m
         );
         storage.saveInterrogation(caseData.id, suspect.id, updated);
+        void syncInterrogation(caseData.id, suspect.id, updated);
         return updated;
       });
 
@@ -252,6 +254,7 @@ export default function InterrogateClient() {
               { role: 'assistant' as const, content: errorContent, timestamp: Date.now() },
             ];
         storage.saveInterrogation(caseData.id, suspect.id, updated);
+        void syncInterrogation(caseData.id, suspect.id, updated);
         return updated;
       });
     } finally {

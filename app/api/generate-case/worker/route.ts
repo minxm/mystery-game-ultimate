@@ -7,7 +7,11 @@ export const maxDuration = 600;
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { jobId, difficulty } = body as { jobId?: string; difficulty?: string };
+    const { jobId, difficulty, userId } = body as {
+      jobId?: string;
+      difficulty?: string;
+      userId?: string | null;
+    };
 
     if (!jobId || !difficulty) {
       return NextResponse.json(
@@ -17,7 +21,7 @@ export async function POST(request: NextRequest) {
     }
 
     console.log('[Worker] Case generation worker started:', jobId);
-    await executeCaseGenerationJob(jobId, difficulty, { timeoutMs: 0 });
+    await executeCaseGenerationJob(jobId, difficulty, { timeoutMs: 0, userId });
 
     return NextResponse.json({ success: true, jobId });
   } catch (error: unknown) {
