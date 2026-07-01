@@ -84,6 +84,16 @@ function readLegacyCase(id: string): CaseData | null {
   }
 }
 
+export async function listStoredCases(): Promise<CaseData[]> {
+  const db = await openDb();
+  try {
+    const all = await idbGetAll(db);
+    return [...all].sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+  } finally {
+    db.close();
+  }
+}
+
 /** 保存完整案件（含 base64 AI 图），使用 IndexedDB，不受 localStorage 5MB 限制 */
 export async function saveCaseData(caseData: CaseData): Promise<void> {
   memoryCache.set(caseData.id, caseData);

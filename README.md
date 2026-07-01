@@ -33,7 +33,7 @@ npm install
 创建 `.env.local` 文件：
 
 ```env
-OPENAI_API_KEY=your_openai_api_key_here
+SILICONFLOW_API_KEY=your_siliconflow_api_key_here
 ```
 
 ### 3. 运行开发服务器

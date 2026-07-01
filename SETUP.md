@@ -12,10 +12,10 @@ cd mystery-game-ultimate
 npm install
 ```
 
-### 2. 配置 OpenAI API Key
+### 2. 配置 SILICONFLOW API Key
 编辑 `.env.local` 文件，填入你的 API Key：
 ```
-OPENAI_API_KEY=your_actual_openai_api_key
+SILICONFLOW_API_KEY=your_actual_siliconflow_api_key
 ```
 
 ### 3. 启动开发服务器

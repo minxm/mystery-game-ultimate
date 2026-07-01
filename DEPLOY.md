@@ -29,12 +29,12 @@ vercel
 部署完成后，需要添加环境变量：
 
 ```bash
-vercel env add OPENAI_API_KEY
+vercel env add SILICONFLOW_API_KEY
 ```
 
 然后输入你的 API Key：
 ```
-your_actual_openai_api_key
+your_actual_siliconflow_api_key
 ```
 
 选择环境：
@@ -71,8 +71,8 @@ vercel --prod
 
 4. **添加环境变量**
    在 "Environment Variables" 部分：
-   - Name: `OPENAI_API_KEY`
-   - Value: your_actual_openai_api_key
+   - Name: `SILICONFLOW_API_KEY`
+   - Value: your_actual_siliconflow_api_key
    - 勾选 Production, Preview, Development
 
 5. **点击 Deploy**
@@ -97,7 +97,7 @@ git push -u origin main
 3. **在 Vercel 导入 GitHub 仓库**
    - 访问 https://vercel.com/new
    - 选择你刚创建的 GitHub 仓库
-   - 添加环境变量 `OPENAI_API_KEY`
+   - 添加环境变量 `SILICONFLOW_API_KEY`
    - 点击 Deploy
 
 ---
@@ -105,8 +105,8 @@ git push -u origin main
 ## 环境变量说明
 
 必需的环境变量：
-- `OPENAI_API_KEY`: 第三方 API 密钥
-  - 值: your_actual_openai_api_key
+- `SILICONFLOW_API_KEY`: 第三方 API 密钥
+  - 值: your_actual_siliconflow_api_key
   - 用于: AI 生成案件、嫌疑人对话、推理评分
 
 ---
@@ -125,7 +125,7 @@ git push -u origin main
 
 ### Q: 部署后 API 调用失败？
 A: 检查环境变量是否正确设置。在 Vercel 项目设置中：
-   Settings → Environment Variables → 确认 `OPENAI_API_KEY` 存在
+   Settings → Environment Variables → 确认 `SILICONFLOW_API_KEY` 存在
 
 ### Q: 如何更新部署？
 A: 

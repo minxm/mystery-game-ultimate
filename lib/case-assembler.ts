@@ -91,19 +91,20 @@ export async function buildCaseDataWithImagesProgressive(
   jobId: string
 ): Promise<CaseData> {
   const caseData = buildCaseData(difficulty, caseContent);
+  const jobMeta = { difficulty };
 
   await patchCaseJob(jobId, {
     stage: 'pending',
     progressMessage: 'AI 正在构建案件框架…',
     caseData,
-  });
+  }, jobMeta);
 
   const advanceStage = async (
     stage: 'victim_ready' | 'suspects_ready' | 'text_ready',
     message: string,
     data: CaseData
   ) => {
-    await patchCaseJob(jobId, { stage, progressMessage: message, caseData: { ...data } });
+    await patchCaseJob(jobId, { stage, progressMessage: message, caseData: { ...data } }, jobMeta);
   };
 
   if (shouldGenerateImages()) {
@@ -124,12 +125,12 @@ export async function buildCaseDataWithImagesProgressive(
       console.warn('[CaseAssembler] Fallback image prompts:', (error as Error)?.message);
     }
 
-    await patchCaseJob(jobId, { progressMessage: '正在绘制受害者肖像…' });
+    await patchCaseJob(jobId, { progressMessage: '正在绘制受害者肖像…' }, jobMeta);
     const victimImageUrl = await generateImageWithRetry(imagePrompts.victim);
     caseData.victim.imageUrl = victimImageUrl || caseData.victim.imageUrl;
     await advanceStage('victim_ready', '受害者档案已锁定', caseData);
 
-    await patchCaseJob(jobId, { progressMessage: '正在绘制嫌疑人肖像…' });
+    await patchCaseJob(jobId, { progressMessage: '正在绘制嫌疑人肖像…' }, jobMeta);
     const suspectImageById: Record<string, string> = {};
     for (let i = 0; i < suspects.length; i++) {
       const suspect = suspects[i] as { id?: string };
@@ -146,13 +147,13 @@ export async function buildCaseDataWithImagesProgressive(
       await patchCaseJob(jobId, {
         progressMessage: `嫌疑人肖像 ${i + 1}/${suspects.length}…`,
         caseData: { ...caseData },
-      });
+      }, jobMeta);
     }
     await advanceStage('suspects_ready', '嫌疑人已全部登场', caseData);
 
     await advanceStage('text_ready', '案件卷宗整理完成', caseData);
 
-    await patchCaseJob(jobId, { progressMessage: '正在还原案发现场…' });
+    await patchCaseJob(jobId, { progressMessage: '正在还原案发现场…' }, jobMeta);
     const sceneImageUrl = await generateImageWithRetry(imagePrompts.scene);
     caseData.sceneImageUrl = sceneImageUrl || caseData.sceneImageUrl;
   } else {
@@ -169,7 +170,7 @@ export async function buildCaseDataWithImagesProgressive(
     stage: 'done',
     progressMessage: '取证完成',
     caseData: { ...caseData },
-  });
+  }, jobMeta);
 
   return caseData;
 }

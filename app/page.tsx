@@ -16,9 +16,9 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import ParticleBackground from '@/components/ParticleBackground';
 import HomeAtmosphere, { HeroMagnifierIcon } from '@/components/HomeAtmosphere';
-import AuthButton from '@/components/AuthButton';
-import OnlinePresence from '@/components/OnlinePresence';
+import { UserStatsBar, RecommendedCasesPanel, PlayedCasesPanel } from '@/components/UserDashboard';
 import Link from 'next/link';
+import { saveCaseData } from '@/lib/case-store';
 
 export default function HomePage() {
   const router = useRouter();
@@ -28,7 +28,7 @@ export default function HomePage() {
 
   const handleStartCase = async () => {
     setIsGenerating(true);
-    setGeneratingStatus('正在提交生成任务…');
+    setGeneratingStatus('正在匹配案件…');
     try {
       const response = await fetch('/api/generate-case', {
         method: 'POST',
@@ -42,10 +42,20 @@ export default function HomePage() {
         throw new Error(startData.error || `HTTP error! status: ${response.status}`);
       }
 
+      // 库存命中：直接读取，秒进游戏
+      if (startData.source === 'inventory' && startData.caseData) {
+        setGeneratingStatus('案件已就绪，正在打开卷宗…');
+        await saveCaseData(startData.caseData);
+        router.push(`/case/${startData.caseId ?? startData.caseData.id}`);
+        return;
+      }
+
+      // 库存无货：走 AI 生成流程
       if (!startData.jobId) {
         throw new Error('未收到任务 ID');
       }
 
+      setGeneratingStatus('正在 AI 生成全新案件…');
       router.push(
         `/generating/${startData.jobId}?difficulty=${encodeURIComponent(selectedDifficulty)}`
       );
@@ -106,25 +116,6 @@ export default function HomePage() {
     <div className="min-h-screen relative overflow-hidden page-shell">
       <HomeAtmosphere />
       <ParticleBackground />
-
-      {/* 顶栏 */}
-      <header className="relative z-20 border-b border-white/[0.06] bg-[#040d1a]/60 backdrop-blur-md">
-        <div className="container mx-auto px-4 py-3 flex items-center justify-between max-w-6xl">
-          <span className="font-mono text-[10px] tracking-[0.35em] text-blue-400/50 uppercase">
-            Detective OS
-          </span>
-          <div className="flex items-center gap-4">
-            <OnlinePresence />
-            <Link
-              href="/leaderboard"
-              className="text-[10px] font-mono tracking-wider text-white/40 hover:text-blue-300/80 transition-colors"
-            >
-              排行榜
-            </Link>
-            <AuthButton />
-          </div>
-        </div>
-      </header>
 
       <div className="relative z-10 container mx-auto px-4 py-10 md:py-16 max-w-6xl">
         {/* Hero */}
@@ -203,6 +194,7 @@ export default function HomePage() {
           transition={{ delay: 0.45 }}
           className="max-w-3xl mx-auto"
         >
+          <UserStatsBar />
           <div className="flex items-center justify-center gap-3 mb-8">
             <div className="h-px w-12 bg-gradient-to-r from-transparent to-blue-500/40" />
             <h2 className="text-sm md:text-base font-bold tracking-[0.3em] text-blue-300/80 uppercase flex items-center gap-2">
@@ -278,6 +270,9 @@ export default function HomePage() {
             </p>
           </div>
         </motion.section>
+
+        <RecommendedCasesPanel />
+        <PlayedCasesPanel />
 
         <footer className="mt-16 md:mt-24 text-center space-y-1">
           <p className="text-[10px] font-mono text-white/20 tracking-[0.2em]">

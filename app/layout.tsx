@@ -2,7 +2,10 @@ import type { Metadata, Viewport } from "next";
 import { Noto_Sans_SC } from "next/font/google";
 import "./globals.css";
 import MysteryBackdrop from "@/components/MysteryBackdrop";
+import AppHeader from "@/components/AppHeader";
 import { AuthProvider } from "@/components/AuthProvider";
+import { CloudSyncProvider } from "@/components/CloudSyncProvider";
+import { PresenceProvider } from "@/components/PresenceProvider";
 
 // Noto Sans SC：清晰的中文无衬线，带动漫感的现代气质
 const notoSansSC = Noto_Sans_SC({
@@ -33,8 +36,13 @@ export default function RootLayout({
     <html lang="zh-CN">
       <body className={`${notoSansSC.variable} font-sans overflow-x-hidden`}>
         <AuthProvider>
-          <MysteryBackdrop />
-          {children}
+          <CloudSyncProvider>
+            <PresenceProvider>
+              <MysteryBackdrop />
+              <AppHeader />
+              {children}
+            </PresenceProvider>
+          </CloudSyncProvider>
         </AuthProvider>
       </body>
     </html>

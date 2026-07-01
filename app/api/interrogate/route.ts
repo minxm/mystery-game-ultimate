@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { createSuspectChatStream, formatSuspectChatError } from '@/lib/ai';
+import { setAiRequestContext, clearAiRequestContext } from '@/lib/ai-service';
 import { serializeCaseForPrompt } from '@/lib/case-prompt';
 import {
   getOrBuildKnowledgeIndex,
@@ -103,6 +104,9 @@ export async function POST(request: NextRequest) {
     messages
   );
 
+  const caseId = typeof caseData.id === 'string' ? caseData.id : undefined;
+  setAiRequestContext({ caseId, metadata: { suspectId: suspect.id } });
+
   const stream = new ReadableStream({
     async start(controller) {
       try {
@@ -125,6 +129,7 @@ export async function POST(request: NextRequest) {
         const message = formatSuspectChatError(error);
         controller.enqueue(sseData({ error: message, content: message }));
       } finally {
+        clearAiRequestContext();
         controller.close();
       }
     },

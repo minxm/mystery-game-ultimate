@@ -5,7 +5,8 @@ import { useRouter, useParams } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { Search, Users, Clock, ArrowRight, Skull, AlertTriangle, Eye } from 'lucide-react';
 import { CaseData } from '@/lib/types';
-import { storage, loadCaseData } from '@/lib/utils';
+import { storage, loadCaseData, saveCaseData } from '@/lib/utils';
+import { syncProgress } from '@/lib/cloud-sync';
 import { getAvatarPlaceholder, getScenePlaceholder } from '@/lib/placeholder';
 import ParticleBackground from '@/components/ParticleBackground';
 import Image from 'next/image';
@@ -40,7 +41,19 @@ export default function CasePage() {
     let cancelled = false;
 
     (async () => {
-      const data = await loadCaseData(caseId);
+      let data = await loadCaseData(caseId);
+      if (!data) {
+        try {
+          const res = await fetch(`/api/cases/${encodeURIComponent(caseId)}`);
+          const json = await res.json();
+          if (res.ok && json.success && json.caseData) {
+            data = json.caseData as CaseData;
+            await saveCaseData(data);
+          }
+        } catch {
+          /* fallback failed */
+        }
+      }
       if (cancelled) return;
 
       if (data) {
@@ -48,13 +61,15 @@ export default function CasePage() {
         setCaseNum(data.id.slice(-6).toUpperCase());
         const progress = storage.getProgress(caseId);
         if (!progress) {
-          storage.saveProgress({
+          const newProgress = {
             caseId,
-            discoveredEvidence: [],
-            interrogatedSuspects: [],
+            discoveredEvidence: [] as string[],
+            interrogatedSuspects: [] as string[],
             notes: '',
             startTime: Date.now(),
-          });
+          };
+          storage.saveProgress(newProgress);
+          void syncProgress(newProgress);
         }
       }
       setLoading(false);

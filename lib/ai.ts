@@ -1,5 +1,14 @@
-import OpenAI from 'openai';
-import { AI_CONFIG, getAiConfigError, getJsonGenerationClientTimeoutMs, isServerlessEnv } from './ai-config';
+import {
+  AI_CONFIG,
+  getAiConfigError,
+  isServerlessEnv,
+  chatJsonCompletion,
+  chatCompletion,
+  chatCompletionStream,
+  imageGeneration,
+  createEmbeddings as aiCreateEmbeddings,
+  buildContext,
+} from './ai-service';
 import {
   validateCaseBase,
   validateCaseCast,
@@ -35,21 +44,6 @@ console.log('[AI] Embedding model:', AI_CONFIG.embeddingModel);
 if (configError) {
   console.error('[AI] Configuration error:', configError);
 }
-
-const client = new OpenAI({
-  apiKey: AI_CONFIG.apiKey,
-  baseURL: AI_CONFIG.baseURL,
-  timeout: isServerlessEnv() ? 120000 : 60000,
-  maxRetries: 0,
-});
-
-/** 案件 JSON / 图片 Prompt 等长耗时请求专用客户端 */
-const jsonClient = new OpenAI({
-  apiKey: AI_CONFIG.apiKey,
-  baseURL: AI_CONFIG.baseURL,
-  timeout: getJsonGenerationClientTimeoutMs(),
-  maxRetries: 0,
-});
 
 function isQwen3Model(model: string): boolean {
   return /Qwen\/Qwen3/i.test(model);
@@ -343,24 +337,27 @@ async function callCaseJson(
   prompt: string,
   maxTokens: number,
   model: string = AI_CONFIG.casePolishModel,
-  roleHint = '悬疑推理编剧'
+  roleHint = '悬疑推理编剧',
+  operation: 'case_framework' | 'case_polish' | 'case_full' | 'case_base' | 'case_cast' | 'case_details' | 'image_prompt' = 'case_full'
 ) {
   assertApiKeyConfigured();
-  const completion = await jsonClient.chat.completions.create({
+  const completion = await chatJsonCompletion(
+    buildContext(operation),
     model,
-    messages: [
+    [
       {
         role: 'system',
         content: `/no_think\n你是${roleHint}。只输出一个合法 JSON 对象，禁止任何解释、markdown 代码块、思考过程或重复内容。`,
       },
       { role: 'user', content: prompt },
     ],
-    temperature: 0.6,
-    frequency_penalty: 0.3,
-    max_tokens: maxTokens,
-    response_format: { type: 'json_object' },
-    ...getThinkingDisabledExtraBody(model),
-  } as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming);
+    {
+      maxTokens,
+      temperature: 0.6,
+      frequencyPenalty: 0.3,
+      extra: getThinkingDisabledExtraBody(model),
+    }
+  );
   const choice = completion.choices[0];
   const finishReason = choice.finish_reason;
   if (finishReason === 'length') {
@@ -379,7 +376,14 @@ export async function generateCaseFrameworkWithAI(
   const prompt = serverless
     ? buildServerlessCasePrompt(difficulty, theme)
     : buildCaseFrameworkPrompt(difficulty, theme);
-  const maxTokens = serverless ? 3072 : 4096;
+  const maxTokens =
+    difficulty === 'hard' || difficulty === 'expert'
+      ? serverless
+        ? 4096
+        : 6144
+      : serverless
+        ? 3072
+        : 4096;
 
   console.log('[AI] Generating case framework...');
   console.log('[AI] Framework model:', AI_CONFIG.caseFrameworkModel);
@@ -388,7 +392,8 @@ export async function generateCaseFrameworkWithAI(
     prompt,
     maxTokens,
     AI_CONFIG.caseFrameworkModel,
-    '悬疑案件架构师'
+    '悬疑案件架构师',
+    'case_framework'
   );
   return validateFullCase(raw);
 }
@@ -410,7 +415,8 @@ export async function polishCaseWithAI(
     prompt,
     maxTokens,
     AI_CONFIG.casePolishModel,
-    '悬疑推理编剧'
+    '悬疑推理编剧',
+    'case_polish'
   );
   return validateFullCase(raw);
 }
@@ -442,17 +448,23 @@ export async function generateFullCaseWithAI(
   const raw = await callCaseJson(
     prompt,
     maxTokens,
-    AI_CONFIG.casePolishModel
+    AI_CONFIG.casePolishModel,
+    '悬疑推理编剧',
+    'case_full'
   );
   return validateFullCase(raw);
 }
 
 export async function generateCaseBaseWithAI(difficulty: string): Promise<any> {
   console.log('[AI] Generating case base...');
+  const maxTokens =
+    difficulty === 'hard' || difficulty === 'expert' ? 3000 : difficulty === 'medium' ? 2000 : 1500;
   const raw = await callCaseJson(
     buildCaseBasePrompt(difficulty),
-    1500,
-    AI_CONFIG.caseFrameworkModel
+    maxTokens,
+    AI_CONFIG.caseFrameworkModel,
+    '悬疑推理编剧',
+    'case_base'
   );
   return validateCaseBase(raw);
 }
@@ -465,7 +477,9 @@ export async function generateCaseCastWithAI(
   const raw = await callCaseJson(
     buildCaseCastPrompt(difficulty, base),
     3000,
-    AI_CONFIG.caseFrameworkModel
+    AI_CONFIG.caseFrameworkModel,
+    '悬疑推理编剧',
+    'case_cast'
   );
   return validateCaseCast(raw);
 }
@@ -485,7 +499,9 @@ export async function generateCaseDetailsWithAI(
   const raw = await callCaseJson(
     buildCaseDetailsPrompt(difficulty, core),
     2000,
-    AI_CONFIG.caseFrameworkModel
+    AI_CONFIG.caseFrameworkModel,
+    '悬疑推理编剧',
+    'case_details'
   );
   return validateCaseDetails(raw);
 }
@@ -505,9 +521,10 @@ export async function generateCaseWithAI(difficulty: string, theme?: string): Pr
     console.log('[AI] Serverless mode:', serverless);
     console.log('[AI] Case model:', AI_CONFIG.casePolishModel);
 
-    const completion = await jsonClient.chat.completions.create({
-      model: AI_CONFIG.casePolishModel,
-      messages: [
+    const completion = await chatJsonCompletion(
+      buildContext('case_full'),
+      AI_CONFIG.casePolishModel,
+      [
         {
           role: 'system',
           content:
@@ -518,12 +535,13 @@ export async function generateCaseWithAI(difficulty: string, theme?: string): Pr
           content: prompt,
         },
       ],
-      temperature: serverless ? 0.7 : 0.8,
-      frequency_penalty: 0.3,
-      max_tokens: serverless ? 3072 : 6144,
-      response_format: { type: 'json_object' },
-      ...getThinkingDisabledExtraBody(AI_CONFIG.casePolishModel),
-    } as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming);
+      {
+        maxTokens: serverless ? 3072 : 6144,
+        temperature: serverless ? 0.7 : 0.8,
+        frequencyPenalty: 0.3,
+        extra: getThinkingDisabledExtraBody(AI_CONFIG.casePolishModel),
+      }
+    );
 
     console.log('[AI] Case generation successful');
     const content = completion.choices[0].message.content;
@@ -589,9 +607,10 @@ ${caseJson}
 只输出 JSON。`;
 
     console.log('[AI] Generating image prompts with Qwen3-8B...');
-    const completion = await jsonClient.chat.completions.create({
-      model: AI_CONFIG.imagePromptModel,
-      messages: [
+    const completion = await chatJsonCompletion(
+      buildContext('image_prompt'),
+      AI_CONFIG.imagePromptModel,
+      [
         {
           role: 'system',
           content:
@@ -599,11 +618,12 @@ ${caseJson}
         },
         { role: 'user', content: prompt },
       ],
-      temperature: 0.7,
-      max_tokens: 2048,
-      response_format: { type: 'json_object' },
-      ...getThinkingDisabledExtraBody(AI_CONFIG.imagePromptModel),
-    } as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming);
+      {
+        maxTokens: 2048,
+        temperature: 0.7,
+        extra: getThinkingDisabledExtraBody(AI_CONFIG.imagePromptModel),
+      }
+    );
 
     const content = completion.choices[0].message.content;
     if (!content) throw new Error('图片 prompt 返回为空');
@@ -654,22 +674,13 @@ async function generateImageOnce(prompt: string): Promise<string> {
 
   let response;
   try {
-    response = await client.images.generate({
-      model: AI_CONFIG.imageModel,
-      prompt,
-      n: 1,
-      size: '1024x1024',
-      response_format: 'b64_json',
+    response = await imageGeneration(buildContext('image_generate'), prompt, {
+      responseFormat: 'b64_json',
     });
   } catch (error: any) {
     // 部分模型不支持 response_format，降级为默认返回
     console.warn('[AI] b64_json request failed, retrying without response_format:', error?.message);
-    response = await client.images.generate({
-      model: AI_CONFIG.imageModel,
-      prompt,
-      n: 1,
-      size: '1024x1024',
-    });
+    response = await imageGeneration(buildContext('image_generate'), prompt);
   }
 
   const imageData = response.data?.[0];
@@ -710,17 +721,7 @@ async function persistRemoteImage(url: string): Promise<string> {
 
 /** 案件知识库向量嵌入（BAAI/bge-m3） */
 export async function createEmbeddings(inputs: string[]): Promise<number[][]> {
-  assertApiKeyConfigured();
-  if (inputs.length === 0) return [];
-
-  const response = await client.embeddings.create({
-    model: AI_CONFIG.embeddingModel,
-    input: inputs,
-  });
-
-  return response.data
-    .sort((a, b) => a.index - b.index)
-    .map((item) => item.embedding);
+  return aiCreateEmbeddings(buildContext('embedding'), inputs);
 }
 
 function cleanSuspectReply(content: string): string {
@@ -751,19 +752,18 @@ export async function createSuspectChatStream(
 ) {
   assertApiKeyConfigured();
   console.log('[AI] Starting suspect chat stream (GLM roleplay)...');
-  return client.chat.completions.create({
-    model: AI_CONFIG.chatModel,
-    messages: [
+  return chatCompletionStream(
+    buildContext('chat_interrogate'),
+    AI_CONFIG.chatModel,
+    [
       { role: 'system', content: systemPrompt },
       ...messages.map((m) => ({
         role: m.role as 'user' | 'assistant',
         content: m.content,
       })),
     ],
-    temperature: 0.8,
-    max_tokens: 300,
-    stream: true,
-  });
+    { temperature: 0.8, maxTokens: 300 }
+  );
 }
 
 export async function chatWithSuspect(
@@ -773,18 +773,18 @@ export async function chatWithSuspect(
   try {
     assertApiKeyConfigured();
     console.log('[AI] Starting suspect chat (GLM roleplay)...');
-    const completion = await client.chat.completions.create({
-      model: AI_CONFIG.chatModel,
-      messages: [
+    const completion = await chatCompletion(
+      buildContext('chat_interrogate'),
+      AI_CONFIG.chatModel,
+      [
         { role: 'system', content: systemPrompt },
         ...messages.map((m) => ({
           role: m.role as 'user' | 'assistant',
           content: m.content,
         })),
       ],
-      temperature: 0.8,
-      max_tokens: 300,
-    });
+      { temperature: 0.8, maxTokens: 300 }
+    );
 
     console.log('[AI] Suspect chat successful');
     const content = completion.choices[0].message.content || '';
@@ -854,9 +854,10 @@ ${userDeduction}
   try {
     assertApiKeyConfigured();
     console.log('[AI] Starting deduction evaluation (DeepSeek-R1)...');
-    const completion = await client.chat.completions.create({
-      model: AI_CONFIG.evaluateModel,
-      messages: [
+    const completion = await chatJsonCompletion(
+      buildContext('evaluate'),
+      AI_CONFIG.evaluateModel,
+      [
         {
           role: 'system',
           content: '你是专业的推理评分系统。请直接输出合法 JSON。',
@@ -866,10 +867,8 @@ ${userDeduction}
           content: prompt,
         },
       ],
-      temperature: 0.3,
-      max_tokens: 2048,
-      response_format: { type: 'json_object' },
-    });
+      { maxTokens: 2048, temperature: 0.3 }
+    );
 
     const content = completion.choices[0].message.content;
     console.log('[AI] Evaluation successful');

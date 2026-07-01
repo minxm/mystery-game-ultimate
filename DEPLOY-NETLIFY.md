@@ -39,10 +39,15 @@ netlify init
 **步骤 3：添加环境变量**
 ```bash
 netlify env:set SILICONFLOW_API_KEY "你的硅基流动API密钥"
+
+# Supabase（登录/云同步/排行榜）
+netlify env:set NEXT_PUBLIC_SUPABASE_URL "https://xxx.supabase.co"
+netlify env:set NEXT_PUBLIC_SUPABASE_ANON_KEY "eyJ..."
+netlify env:set SUPABASE_SERVICE_ROLE_KEY "eyJ..."
 ```
 
-> 注册地址：https://cloud.siliconflow.cn  
-> 旧版 `OPENAI_API_KEY` 仍兼容，但建议改用 `SILICONFLOW_API_KEY`。
+> 或使用一键脚本：`bash scripts/setup-supabase-netlify.sh`  
+> Supabase 数据库迁移：在 SQL Editor 执行 `supabase/migrations/000_combined_all.sql`
 
 **步骤 4：生产部署**
 ```bash
@@ -74,9 +79,12 @@ git push -u origin main
    - Build command: `npm run build`
    - Publish directory: `.next`
 5. 添加环境变量：
-   - Key: `SILICONFLOW_API_KEY`
-   - Value: 你的硅基流动 API Key（https://cloud.siliconflow.cn）
-6. 点击 "Deploy site"
+   - `SILICONFLOW_API_KEY` — 硅基流动 API Key
+   - `NEXT_PUBLIC_SUPABASE_URL` — Supabase 项目 URL
+   - `NEXT_PUBLIC_SUPABASE_ANON_KEY` — Supabase anon key
+   - `SUPABASE_SERVICE_ROLE_KEY` — Supabase service_role key（勾选 Sensitive）
+6. 在 Supabase SQL Editor 执行 `supabase/migrations/000_combined_all.sql`
+7. 点击 "Deploy site"
 
 ---
 

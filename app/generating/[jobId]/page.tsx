@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Skull, Users, FileText, Sparkles } from 'lucide-react';
@@ -29,25 +29,45 @@ export default function GeneratingPage() {
   const [message, setMessage] = useState('正在提交生成任务…');
   const [caseData, setCaseData] = useState<CaseData | null>(null);
   const [error, setError] = useState('');
+  const [isRedirecting, setIsRedirecting] = useState(false);
   const [imgErrors, setImgErrors] = useState<Set<string>>(new Set());
+  const finishingRef = useRef(false);
 
   const markBroken = (id: string) =>
     setImgErrors((prev) => new Set([...prev, id]));
 
-  const finishCase = useCallback(
-    async (data: CaseData) => {
-      await saveCaseData(data);
-      router.push(`/case/${data.id}`);
-    },
-    [router]
-  );
-
   useEffect(() => {
     if (!jobId) return;
 
+    finishingRef.current = false;
     let cancelled = false;
     const startedAt = Date.now();
     const maxWaitMs = 720000;
+
+    async function completeAndGo(data: CaseData) {
+      if (cancelled || finishingRef.current) return;
+      finishingRef.current = true;
+      cancelled = true;
+      setIsRedirecting(true);
+      setStage('done');
+      setCaseData(data);
+      setMessage('取证完成，正在打开卷宗…');
+      try {
+        await saveCaseData(data);
+        void fetch('/api/cases/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ caseData: data }),
+        });
+        router.replace(`/case/${data.id}`);
+      } catch (e) {
+        console.error('[Generating] save failed:', e);
+        finishingRef.current = false;
+        cancelled = false;
+        setIsRedirecting(false);
+        setError('保存案件失败，请重试');
+      }
+    }
 
     // Supabase Realtime 订阅（配置后替代纯轮询）
     let cleanupRealtime: (() => void) | undefined;
@@ -65,6 +85,7 @@ export default function GeneratingPage() {
               filter: `job_id=eq.${jobId}`,
             },
             (payload) => {
+              if (finishingRef.current) return;
               const row = payload.new as {
                 status: string;
                 stage: CaseJobStage;
@@ -76,8 +97,8 @@ export default function GeneratingPage() {
               if (row.stage) setStage(row.stage);
               if (row.progress_message) setMessage(row.progress_message);
               if (row.status === 'error') setError(row.error || '案件生成失败');
-              if (row.status === 'done' && row.case_data && !cancelled) {
-                void finishCase(row.case_data);
+              if (row.status === 'done' && row.case_data) {
+                void completeAndGo(row.case_data);
               }
             }
           )
@@ -89,12 +110,14 @@ export default function GeneratingPage() {
     }
 
     async function poll() {
-      while (!cancelled && Date.now() - startedAt < maxWaitMs) {
+      while (!cancelled && !finishingRef.current && Date.now() - startedAt < maxWaitMs) {
         try {
           const res = await fetch(
             `/api/generate-case/status?jobId=${encodeURIComponent(jobId)}`
           );
           const data = await res.json().catch(() => ({}));
+
+          if (finishingRef.current || cancelled) return;
 
           if (res.ok && data.caseData) {
             setCaseData(data.caseData);
@@ -114,10 +137,7 @@ export default function GeneratingPage() {
           }
 
           if (data.status === 'done' && data.caseData) {
-            setStage('done');
-            setMessage('取证完成，正在打开卷宗…');
-            await new Promise((r) => setTimeout(r, 800));
-            if (!cancelled) await finishCase(data.caseData);
+            await completeAndGo(data.caseData);
             return;
           }
         } catch (e) {
@@ -127,7 +147,7 @@ export default function GeneratingPage() {
         await new Promise((r) => setTimeout(r, 1000));
       }
 
-      if (!cancelled) {
+      if (!cancelled && !finishingRef.current) {
         setError('生成超时，请返回首页重试');
       }
     }
@@ -137,11 +157,28 @@ export default function GeneratingPage() {
       cancelled = true;
       cleanupRealtime?.();
     };
-  }, [jobId, finishCase]);
+  }, [jobId, router]);
 
-  const showVictim = isStageAtLeast(stage, 'victim_ready') && caseData?.victim;
-  const showSuspects = isStageAtLeast(stage, 'suspects_ready') && caseData?.suspects;
-  const showText = isStageAtLeast(stage, 'text_ready') && caseData;
+  const showVictim = !isRedirecting && isStageAtLeast(stage, 'victim_ready') && caseData?.victim;
+  const showSuspects = !isRedirecting && isStageAtLeast(stage, 'suspects_ready') && caseData?.suspects;
+  const showText = !isRedirecting && isStageAtLeast(stage, 'text_ready') && caseData;
+
+  if (isRedirecting) {
+    return (
+      <div className="min-h-screen relative overflow-hidden bg-dark-900 page-shell">
+        <ParticleBackground />
+        <div className="relative z-10 flex min-h-screen items-center justify-center px-4">
+          <div className="text-center">
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full border-2 border-blue-500/60 mb-4 relative">
+              <div className="absolute inset-0 rounded-full border-2 border-blue-500 border-t-transparent animate-spin" />
+              <Sparkles className="w-7 h-7 text-blue-400" />
+            </div>
+            <p className="text-blue-400/80 text-sm animate-pulse">{message}</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen relative overflow-hidden bg-dark-900 page-shell">
@@ -159,9 +196,10 @@ export default function GeneratingPage() {
             <Sparkles className="w-7 h-7 text-blue-400" />
           </div>
           <h1 className="text-2xl md:text-3xl font-black text-white mb-2 tracking-wide">
-            案件生成中
+            AI 正在生成案件
           </h1>
           <p className="text-blue-400/80 text-sm animate-pulse">{message}</p>
+          <p className="text-xs text-gray-600 mt-2">库存暂无该难度案件，正在现场调用 AI 生成</p>
           {error && (
             <div className="mt-4 text-blood-400 text-sm">
               {error}

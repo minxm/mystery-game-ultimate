@@ -11,6 +11,7 @@ import { CaseData } from '@/lib/types';
 import { storage, getScoreRating, formatTime, loadCaseData } from '@/lib/utils';
 import { normalizeTruthShape } from '@/lib/case-schema';
 import ParticleBackground from '@/components/ParticleBackground';
+import CaseSocialPanel from '@/components/CaseSocialPanel';
 
 interface Evaluation {
   score: number;
@@ -342,6 +343,17 @@ export default function ResultPage() {
             )}
           </AnimatePresence>
         </motion.div>
+
+        {caseData && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 1.1 }}
+            className="mt-6"
+          >
+            <CaseSocialPanel caseId={caseData.id} caseTitle={caseData.title} />
+          </motion.div>
+        )}
 
         {/* ── 操作按钮 ── */}
         <motion.div

@@ -10,6 +10,7 @@ import { generateId } from '@/lib/utils';
 import { setCaseJob } from '@/lib/case-job-store';
 import { createFallbackCase } from '@/lib/fallback-case';
 import { getSessionUserId } from '@/lib/supabase/server';
+import { claimCaseFromInventory, shareCaseToInventory } from '@/lib/case-inventory';
 
 export const maxDuration = 60;
 
@@ -94,20 +95,36 @@ export async function POST(request: NextRequest) {
     console.log('[API] Case generation request:', { difficulty, phase, serverless: isServerlessEnv() });
 
     if (phase === 'start') {
-      const jobId = generateId();
       const userId = await getSessionUserId().catch(() => null);
+
+      // ① 库存有货 → 直接读取 → 玩家进入（跳过生成页）
+      const inventoryCase = await claimCaseFromInventory(difficulty, userId);
+      if (inventoryCase) {
+        console.log('[API] Served from inventory:', inventoryCase.id, inventoryCase.title);
+        return NextResponse.json({
+          success: true,
+          source: 'inventory',
+          caseId: inventoryCase.id,
+          caseData: inventoryCase,
+        });
+      }
+
+      // ② 库存无货 → 调用模型生成 → 存库 → 玩家轮询等待后进入
+      const jobId = generateId();
       const jobMeta = { userId, difficulty };
       await setCaseJob(jobId, { status: 'pending', stage: 'pending', createdAt: Date.now() }, jobMeta);
 
       await triggerBackgroundGeneration(request.nextUrl.origin, jobId, difficulty, userId);
 
-      return NextResponse.json({ success: true, jobId });
+      return NextResponse.json({ success: true, source: 'generating', jobId });
     }
 
     const caseContent = await generateCaseWithRetry('Case generation', () =>
       generateCaseWithAI(difficulty)
     );
     const caseData = await buildCaseDataWithImages(difficulty, caseContent);
+    const userId = await getSessionUserId().catch(() => null);
+    await shareCaseToInventory(caseData, difficulty, userId);
 
     console.log('[API] Case data created successfully, id:', caseData.id);
 
@@ -140,6 +157,8 @@ export async function POST(request: NextRequest) {
 
     console.log('[API] Using fallback case, isTimeout:', isTimeout);
     const fallbackCase = createFallbackCase();
+    const userId = await getSessionUserId().catch(() => null);
+    await shareCaseToInventory(fallbackCase, fallbackCase.difficulty, userId);
     return NextResponse.json({
       success: true,
       sync: true,

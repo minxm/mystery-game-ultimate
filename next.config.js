@@ -20,6 +20,12 @@ const nextConfig = {
         hostname: 'oaidalleapiprodscus.blob.core.windows.net',
         pathname: '/**',
       },
+      // Supabase Storage（AI 图片 CDN 缓存）
+      {
+        protocol: 'https',
+        hostname: '*.supabase.co',
+        pathname: '/storage/v1/object/public/**',
+      },
     ],
   },
 };

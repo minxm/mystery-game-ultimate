@@ -7,7 +7,7 @@ import {
   polishCaseWithAI,
 } from '@/lib/ai';
 import { buildCaseDataWithImages, buildCaseDataWithImagesProgressive } from '@/lib/case-assembler';
-import { patchCaseJob } from '@/lib/case-job-store';
+import { setCaseJob } from '@/lib/case-job-store';
 import { mergeCasePhases } from '@/lib/case-schema';
 import { getPhaseTimeoutMs } from '@/lib/ai-config';
 import { CaseData } from '@/lib/types';
@@ -27,9 +27,22 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: str
   }
 }
 
+function getPhaseTimeoutForDifficulty(difficulty: string): number {
+  const base = getPhaseTimeoutMs();
+  if (difficulty === 'hard' || difficulty === 'expert') {
+    return Math.max(base, 240000);
+  }
+  return base;
+}
+
 /** 单个阶段失败（字段缺失/截断/解析/超时）时重试 */
-async function withPhaseRetry<T>(label: string, fn: () => Promise<T>, maxAttempts = 2): Promise<T> {
-  const phaseTimeoutMs = getPhaseTimeoutMs();
+async function withPhaseRetry<T>(
+  label: string,
+  fn: () => Promise<T>,
+  difficulty: string,
+  maxAttempts = 2
+): Promise<T> {
+  const phaseTimeoutMs = getPhaseTimeoutForDifficulty(difficulty);
   let lastError: unknown;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
@@ -50,13 +63,15 @@ async function buildCasePhasedFallback(
   theme?: string
 ): Promise<Record<string, unknown>> {
   console.log('[Orchestrator] Falling back to phased framework generation...');
-  const base = await withPhaseRetry('base', () => generateCaseBaseWithAI(difficulty));
-  const cast = await withPhaseRetry('cast', () => generateCaseCastWithAI(difficulty, base));
-  const details = await withPhaseRetry('details', () =>
-    generateCaseDetailsWithAI(difficulty, { ...base, ...cast }, theme)
+  const base = await withPhaseRetry('base', () => generateCaseBaseWithAI(difficulty), difficulty);
+  const cast = await withPhaseRetry('cast', () => generateCaseCastWithAI(difficulty, base), difficulty);
+  const details = await withPhaseRetry(
+    'details',
+    () => generateCaseDetailsWithAI(difficulty, { ...base, ...cast }, theme),
+    difficulty
   );
   const merged = mergeCasePhases(base, cast, details);
-  return withPhaseRetry('phased polish', () => polishCaseWithAI(difficulty, merged, theme));
+  return withPhaseRetry('phased polish', () => polishCaseWithAI(difficulty, merged, theme), difficulty);
 }
 
 export async function buildCaseFromPhases(
@@ -67,14 +82,25 @@ export async function buildCaseFromPhases(
   let caseContent: Record<string, unknown>;
 
   if (jobId) {
-    await patchCaseJob(jobId, { progressMessage: 'AI 正在撰写案件框架（4B→8B）…' });
+    await setCaseJob(
+      jobId,
+      {
+        status: 'pending',
+        stage: 'pending',
+        progressMessage: 'AI 正在撰写案件框架…',
+        createdAt: Date.now(),
+      },
+      { difficulty }
+    );
   }
 
   try {
     console.log('[Orchestrator] Step 1/2: framework (Qwen3.5-4B)');
     console.log('[Orchestrator] Step 2/2: polish (Qwen3-8B)');
-    caseContent = await withPhaseRetry('framework + polish', () =>
-      generateCaseWithFrameworkAndPolish(difficulty, theme)
+    caseContent = await withPhaseRetry(
+      'framework + polish',
+      () => generateCaseWithFrameworkAndPolish(difficulty, theme),
+      difficulty
     );
   } catch (primaryError) {
     console.warn(
@@ -82,8 +108,10 @@ export async function buildCaseFromPhases(
       (primaryError as Error)?.message
     );
     try {
-      caseContent = await withPhaseRetry('full case', () =>
-        generateFullCaseWithAI(difficulty, theme)
+      caseContent = await withPhaseRetry(
+        'full case',
+        () => generateFullCaseWithAI(difficulty, theme),
+        difficulty
       );
     } catch {
       caseContent = await buildCasePhasedFallback(difficulty, theme);

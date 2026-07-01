@@ -30,12 +30,36 @@ export async function supabaseSetCaseJob(
   record: CaseJobRecord,
   userId?: string | null,
   difficulty?: string
-): Promise<void> {
+): Promise<boolean> {
   const admin = createAdminClientSafe();
-  if (!admin) return;
+  if (!admin) return false;
+
+  let resolvedDifficulty = difficulty;
+  let resolvedUserId = userId;
+
+  if (resolvedDifficulty === undefined || resolvedUserId === undefined) {
+    const { data: existing } = await admin
+      .from('case_generation_jobs')
+      .select('difficulty, user_id')
+      .eq('job_id', jobId)
+      .maybeSingle();
+
+    if (resolvedDifficulty === undefined) {
+      resolvedDifficulty = existing?.difficulty ?? undefined;
+    }
+    if (resolvedUserId === undefined && existing) {
+      resolvedUserId = existing.user_id;
+    }
+  }
+
+  if (!resolvedDifficulty) {
+    console.warn('[CaseJob] Skip Supabase upsert: difficulty required for job', jobId);
+    return false;
+  }
 
   const payload: Record<string, unknown> = {
     job_id: jobId,
+    difficulty: resolvedDifficulty,
     status: record.status,
     stage: record.stage,
     case_data: record.caseData ?? null,
@@ -43,10 +67,17 @@ export async function supabaseSetCaseJob(
     progress_message: record.progressMessage ?? null,
     created_at: new Date(record.createdAt).toISOString(),
   };
-  if (userId !== undefined) payload.user_id = userId;
-  if (difficulty !== undefined) payload.difficulty = difficulty;
+  if (resolvedUserId !== undefined) payload.user_id = resolvedUserId;
 
-  await admin.from('case_generation_jobs').upsert(payload);
+  const { error } = await admin
+    .from('case_generation_jobs')
+    .upsert(payload, { onConflict: 'job_id' });
+
+  if (error) {
+    console.error('[CaseJob] Supabase upsert failed:', error.message, 'jobId:', jobId);
+    return false;
+  }
+  return true;
 }
 
 export async function supabaseGetCaseJob(jobId: string): Promise<CaseJobRecord | null> {
@@ -65,22 +96,33 @@ export async function supabaseGetCaseJob(jobId: string): Promise<CaseJobRecord |
 
 export async function supabasePatchCaseJob(
   jobId: string,
-  patch: Partial<CaseJobRecord>
+  patch: Partial<CaseJobRecord>,
+  meta?: { userId?: string | null; difficulty?: string }
 ): Promise<void> {
   const current = await supabaseGetCaseJob(jobId);
   if (!current) {
-    await supabaseSetCaseJob(jobId, {
-      status: 'pending',
-      stage: 'pending',
-      createdAt: Date.now(),
-      ...patch,
-    });
+    await supabaseSetCaseJob(
+      jobId,
+      {
+        status: 'pending',
+        stage: 'pending',
+        createdAt: Date.now(),
+        ...patch,
+      },
+      meta?.userId,
+      meta?.difficulty
+    );
     return;
   }
 
-  await supabaseSetCaseJob(jobId, {
-    ...current,
-    ...patch,
-    caseData: patch.caseData ?? current.caseData,
-  });
+  await supabaseSetCaseJob(
+    jobId,
+    {
+      ...current,
+      ...patch,
+      caseData: patch.caseData ?? current.caseData,
+    },
+    meta?.userId,
+    meta?.difficulty
+  );
 }

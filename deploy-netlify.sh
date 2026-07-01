@@ -25,6 +25,23 @@ echo "请填入你的硅基流动 API Key（https://cloud.siliconflow.cn）"
 read -p "SILICONFLOW_API_KEY: " SF_KEY
 netlify env:set SILICONFLOW_API_KEY "$SF_KEY"
 
+echo ""
+echo "Supabase 配置（登录/云同步/排行榜，可选但推荐）"
+echo "在 Supabase Dashboard -> Project Settings -> API 获取"
+read -p "NEXT_PUBLIC_SUPABASE_URL: " SB_URL
+read -p "NEXT_PUBLIC_SUPABASE_ANON_KEY: " SB_ANON
+read -sp "SUPABASE_SERVICE_ROLE_KEY: " SB_SERVICE
+echo ""
+if [ -n "$SB_URL" ] && [ -n "$SB_ANON" ] && [ -n "$SB_SERVICE" ]; then
+  netlify env:set NEXT_PUBLIC_SUPABASE_URL "$SB_URL"
+  netlify env:set NEXT_PUBLIC_SUPABASE_ANON_KEY "$SB_ANON"
+  netlify env:set SUPABASE_SERVICE_ROLE_KEY "$SB_SERVICE"
+  echo "Supabase 环境变量已设置"
+  echo "请在 Supabase SQL Editor 执行 supabase/migrations/000_combined_all.sql"
+else
+  echo "跳过 Supabase（可稍后运行 bash scripts/setup-supabase-netlify.sh）"
+fi
+
 # 步骤 4: 生产部署
 echo ""
 echo "步骤 4: 部署到生产环境..."

@@ -2,7 +2,9 @@ import { buildCaseFromPhases } from '@/lib/generate-case-orchestrator';
 import { setCaseJob } from '@/lib/case-job-store';
 import { createFallbackCase } from '@/lib/fallback-case';
 import { uploadCaseImages } from '@/lib/supabase/storage';
-import { saveCaseToDb, logActivity } from '@/lib/supabase/database';
+import { shareCaseToInventory } from '@/lib/case-inventory';
+import { logActivity } from '@/lib/supabase/database';
+import { setAiRequestContext, clearAiRequestContext } from '@/lib/ai-service';
 
 async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -43,6 +45,8 @@ export async function executeCaseGenerationJob(
 
   console.log('[CaseJob] Starting generation:', jobId, 'difficulty:', difficulty);
 
+  setAiRequestContext({ userId, jobId, metadata: { difficulty } });
+
   try {
     const buildPromise = buildCaseFromPhases(difficulty, undefined, jobId);
     let caseData =
@@ -51,7 +55,10 @@ export async function executeCaseGenerationJob(
         : await buildPromise;
 
     caseData = await uploadCaseImages(caseData);
-    await saveCaseToDb(caseData, userId);
+    const shared = await shareCaseToInventory(caseData, difficulty, userId);
+    if (!shared) {
+      throw new Error('案件入库失败');
+    }
     await logActivity(userId, 'case_generated', { caseId: caseData.id, difficulty });
 
     await setCaseJob(jobId, {
@@ -67,7 +74,7 @@ export async function executeCaseGenerationJob(
 
     try {
       const fallbackCase = createFallbackCase(difficulty);
-      await saveCaseToDb(fallbackCase, userId);
+      await shareCaseToInventory(fallbackCase, difficulty, userId);
       await setCaseJob(jobId, {
         status: 'done',
         stage: 'done',
@@ -85,5 +92,7 @@ export async function executeCaseGenerationJob(
         createdAt: Date.now(),
       }, jobMeta);
     }
+  } finally {
+    clearAiRequestContext();
   }
 }

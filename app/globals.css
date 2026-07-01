@@ -311,6 +311,88 @@
   min-width: 0;
 }
 
+/* ── 首页最近案件（PC 走马灯卡片） ── */
+.recent-case-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-height: 11.5rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(30, 144, 255, 0.14);
+  background: linear-gradient(
+    165deg,
+    rgba(10, 24, 48, 0.65) 0%,
+    rgba(4, 13, 26, 0.92) 100%
+  );
+  overflow: hidden;
+  transition:
+    border-color 0.3s ease,
+    box-shadow 0.3s ease,
+    transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.recent-case-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    135deg,
+    rgba(30, 144, 255, 0.06) 0%,
+    transparent 45%
+  );
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+}
+
+.recent-case-card:hover {
+  border-color: rgba(30, 144, 255, 0.35);
+  box-shadow:
+    0 12px 40px rgba(30, 144, 255, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.recent-case-card:hover::after {
+  opacity: 1;
+}
+
+@media (min-width: 768px) {
+  .recent-case-card {
+    min-height: 15.5rem;
+  }
+
+  .recent-case-card:hover {
+    transform: translateY(-6px);
+  }
+}
+
+@media (max-width: 767px) {
+  .recent-case-card {
+    min-height: 14rem;
+  }
+
+  .recent-case-card:active {
+    border-color: rgba(30, 144, 255, 0.3);
+    background: linear-gradient(
+      165deg,
+      rgba(14, 32, 64, 0.75) 0%,
+      rgba(4, 13, 26, 0.95) 100%
+    );
+  }
+}
+
+/* 移动端最近案件横向滑动 */
+.recent-cases-mobile-track {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.recent-cases-mobile-track::-webkit-scrollbar {
+  display: none;
+}
+
 .confidential-badge {
   display: inline-flex;
   align-items: center;

@@ -1,5 +1,6 @@
 import { CaseData, GameProgress, InterrogationMessage, UserStats } from './types';
 import { clearCaseStore, loadCaseDataById, saveCaseData } from './case-store';
+import { computeAchievements, computeStreak } from './achievements';
 
 const STORAGE_KEYS = {
   PROGRESS: 'mystery_progress',
@@ -86,6 +87,13 @@ export const storage = {
       if (score >= 95) {
         stats.perfectSolves += 1;
       }
+      stats.streak = computeStreak(stats.streak, score);
+      stats.achievements = computeAchievements({
+        casesCompleted: stats.casesCompleted,
+        perfectSolves: stats.perfectSolves,
+        streak: stats.streak,
+        lastScore: score,
+      });
       localStorage.setItem(STORAGE_KEYS.STATS, JSON.stringify(stats));
     }
   },
@@ -126,12 +134,16 @@ export function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 }
 
-/** 从 IndexedDB 加载案件（支持含 base64 AI 图的大体积数据） */
+/** 从 IndexedDB 加载案件；优先本地 → 云端（登录用户） */
 export async function loadCaseData(caseId: string): Promise<CaseData | null> {
-  return loadCaseDataById(caseId);
+  const local = await loadCaseDataById(caseId);
+  if (local) return local;
+
+  const { fetchCaseFromCloud } = await import('./cloud-sync');
+  return fetchCaseFromCloud(caseId);
 }
 
-export { saveCaseData, loadCaseDataById } from './case-store';
+export { saveCaseData, loadCaseDataById, listStoredCases } from './case-store';
 
 /** 根据 URL 参数或缓存查找嫌疑人 */
 export function findSuspectByParam(
