@@ -3,6 +3,7 @@ import { Noto_Sans_SC } from "next/font/google";
 import "./globals.css";
 import MysteryBackdrop from "@/components/MysteryBackdrop";
 import AppHeader from "@/components/AppHeader";
+import ScrollToTop from "@/components/ScrollToTop";
 import { AuthProvider } from "@/components/AuthProvider";
 import { CloudSyncProvider } from "@/components/CloudSyncProvider";
 import { PresenceProvider } from "@/components/PresenceProvider";
@@ -40,6 +41,7 @@ export default function RootLayout({
             <PresenceProvider>
               <MysteryBackdrop />
               <AppHeader />
+              <ScrollToTop />
               {children}
             </PresenceProvider>
           </CloudSyncProvider>

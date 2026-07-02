@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { CaseData } from '@/lib/types';
 import { storage, getScoreRating, formatTime, loadCaseData } from '@/lib/utils';
+import type { CaseEvaluation } from '@/lib/types';
 import { normalizeTruthShape } from '@/lib/case-schema';
 import ParticleBackground from '@/components/ParticleBackground';
 import CaseSocialPanel from '@/components/CaseSocialPanel';
@@ -89,7 +90,7 @@ export default function ResultPage() {
     if (evalData) {
       try {
         const parsed = JSON.parse(evalData) as Partial<Evaluation>;
-        setEvaluation({
+        const evaluationPayload: CaseEvaluation = {
           score: Number(parsed.score) || 0,
           breakdown: {
             killer: Number(parsed.breakdown?.killer) || 0,
@@ -101,9 +102,40 @@ export default function ResultPage() {
           rating: parsed.rating ?? '',
           killerCorrect: parsed.killerCorrect,
           missedClues: Array.isArray(parsed.missedClues) ? parsed.missedClues : [],
+        };
+        setEvaluation({
+          score: evaluationPayload.score,
+          breakdown: {
+            killer: Number(evaluationPayload.breakdown?.killer) || 0,
+            method: Number(evaluationPayload.breakdown?.method) || 0,
+            motive: Number(evaluationPayload.breakdown?.motive) || 0,
+            logic: Number(evaluationPayload.breakdown?.logic) || 0,
+          },
+          feedback: evaluationPayload.feedback,
+          rating: evaluationPayload.rating,
+          killerCorrect: evaluationPayload.killerCorrect,
+          missedClues: evaluationPayload.missedClues,
         });
+        storage.saveEvaluation(caseId, evaluationPayload);
       } catch {
         /* ignore corrupt session data */
+      }
+    } else {
+      const localEval = storage.getEvaluation(caseId);
+      if (localEval) {
+        setEvaluation({
+          score: localEval.score,
+          breakdown: {
+            killer: Number(localEval.breakdown?.killer) || 0,
+            method: Number(localEval.breakdown?.method) || 0,
+            motive: Number(localEval.breakdown?.motive) || 0,
+            logic: Number(localEval.breakdown?.logic) || 0,
+          },
+          feedback: localEval.feedback,
+          rating: localEval.rating,
+          killerCorrect: localEval.killerCorrect,
+          missedClues: localEval.missedClues ?? [],
+        });
       }
     }
     const progress = storage.getProgress(caseId);
@@ -351,7 +383,7 @@ export default function ResultPage() {
             transition={{ delay: 1.1 }}
             className="mt-6"
           >
-            <CaseSocialPanel caseId={caseData.id} caseTitle={caseData.title} />
+            <CaseSocialPanel caseId={caseData.id} caseTitle={caseData.title} caseData={caseData} />
           </motion.div>
         )}
 

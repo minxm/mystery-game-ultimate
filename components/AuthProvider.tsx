@@ -56,16 +56,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    supabase.auth.getSession().then(({ data: { session: s } }) => {
-      setSession(s);
-      setUser(s?.user ?? null);
-      setLoading(false);
-    });
+    let authReady = false;
+    const finishAuth = (s: Session | null) => {
+      setSession((prev) => {
+        if (prev?.access_token === s?.access_token && prev?.user?.id === s?.user?.id) {
+          return prev;
+        }
+        return s;
+      });
+      setUser((prev) => {
+        const next = s?.user ?? null;
+        if (prev?.id === next?.id) return prev;
+        return next;
+      });
+      if (!authReady) {
+        authReady = true;
+        setLoading(false);
+      }
+    };
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, s) => {
-      setSession(s);
-      setUser(s?.user ?? null);
-      setLoading(false);
+      finishAuth(s);
+    });
+
+    supabase.auth.getSession().then(({ data: { session: s } }) => {
+      finishAuth(s);
     });
 
     return () => subscription.unsubscribe();

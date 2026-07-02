@@ -8,10 +8,10 @@ import {
   ArrowLeft, CheckCircle, Send, Fingerprint, Zap,
 } from 'lucide-react';
 import { CaseData, Evidence, Suspect } from '@/lib/types';
-import { storage, loadCaseData, getSuspectId } from '@/lib/utils';
+import { storage, loadCaseData, getSuspectId, saveInvestigateTab, resolveInvestigateTab } from '@/lib/utils';
 import { syncProgress, syncEvaluation } from '@/lib/cloud-sync';
-import { getAvatarPlaceholder } from '@/lib/placeholder';
 import ParticleBackground from '@/components/ParticleBackground';
+import { CharacterPortrait } from '@/components/CharacterPortrait';
 import Image from 'next/image';
 
 const SIGNIFICANCE_CONFIG = {
@@ -46,6 +46,7 @@ export default function InvestigatePage() {
 
       if (data) {
         setCaseData(data);
+        setActiveTab(resolveInvestigateTab(caseId));
         const progress = storage.getProgress(caseId);
         if (progress) {
           setDiscoveredEvidence(progress.discoveredEvidence);
@@ -79,6 +80,7 @@ export default function InvestigatePage() {
   const handleInterrogate = (suspect: Suspect, index: number) => {
     if (!caseData) return;
     const suspectId = getSuspectId(suspect, index);
+    saveInvestigateTab(caseData.id, 'suspects');
     sessionStorage.setItem('interrogateTarget', JSON.stringify({ caseId: caseData.id, suspectId }));
     router.push(`/interrogate/${caseData.id}?suspect=${encodeURIComponent(suspectId)}`);
   };
@@ -112,6 +114,7 @@ export default function InvestigatePage() {
             };
         storage.saveProgress(updated);
         storage.updateStats(data.evaluation.score);
+        storage.saveEvaluation(caseData!.id, data.evaluation, deduction);
         void syncProgress(updated);
         void syncEvaluation(caseData!.id, data.evaluation, deduction);
         sessionStorage.setItem('evaluation', JSON.stringify(data.evaluation));
@@ -185,7 +188,11 @@ export default function InvestigatePage() {
             return (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id as any)}
+                onClick={() => {
+                  const nextTab = tab.id as 'evidence' | 'suspects' | 'timeline';
+                  setActiveTab(nextTab);
+                  saveInvestigateTab(caseData.id, nextTab);
+                }}
                 className={`flex-1 flex flex-col md:flex-row items-center justify-center gap-1 md:gap-2 py-3 px-2 md:px-4 rounded-xl transition-all text-sm font-bold relative overflow-hidden ${
                   active
                     ? 'text-white'
@@ -288,21 +295,14 @@ export default function InvestigatePage() {
 
                     {/* 头像区域 */}
                     <div className="relative w-full aspect-[4/3] overflow-hidden">
-                      {suspect.imageUrl && !brokenImages.has(sid) ? (
-                        <Image
-                          src={suspect.imageUrl}
-                          alt={suspect.name}
-                          fill
-                          className="object-cover object-top"
-                          unoptimized
-                          onError={() => markBroken(sid)}
-                        />
-                      ) : (
-                        <div
-                          className="w-full h-full bg-cover bg-center"
-                          style={{ backgroundImage: `url("${getAvatarPlaceholder(suspect.name)}")` }}
-                        />
-                      )}
+                      <CharacterPortrait
+                        name={suspect.name}
+                        imageUrl={suspect.imageUrl}
+                        className="w-full h-full"
+                        imageClassName="object-cover object-top"
+                        broken={brokenImages.has(sid)}
+                        onBroken={() => markBroken(sid)}
+                      />
                       <div className="absolute inset-0 bg-gradient-to-t from-dark-900 via-dark-900/20 to-transparent" />
 
                       {/* 扫描线装饰 */}

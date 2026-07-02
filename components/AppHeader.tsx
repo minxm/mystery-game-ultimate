@@ -1,15 +1,26 @@
 'use client';
 
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { History, Trophy, Activity } from 'lucide-react';
+import { History, Trophy, Activity, Heart, Home } from 'lucide-react';
 import AuthButton from './AuthButton';
+import { useAuth } from './AuthProvider';
+import { authenticatedFetch } from '@/lib/authenticated-fetch';
+import { inflight } from '@/lib/inflight';
 
 const NAV_ITEMS = [
+  { href: '/', label: '首页', icon: Home, exact: true },
   { href: '/history', label: '历史', icon: History },
+  { href: '/favorites', label: '收藏', icon: Heart },
   { href: '/leaderboard', label: '排行', icon: Trophy },
-  { href: '/monitor', label: '监控', icon: Activity },
+  { href: '/monitor', label: '监控', icon: Activity, adminOnly: true },
 ] as const;
+
+function isNavActive(pathname: string, href: string, exact?: boolean) {
+  if (exact) return pathname === href;
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
 
 function navLinkClass(active: boolean) {
   return [
@@ -23,12 +34,40 @@ function navLinkClass(active: boolean) {
 
 export default function AppHeader() {
   const pathname = usePathname();
+  const { user, loading: authLoading } = useAuth();
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    if (authLoading) return;
+
+    let cancelled = false;
+
+    void inflight(`admin-status:${user?.id ?? 'guest'}`, () =>
+      authenticatedFetch('/api/admin/status').then((res) => res.json())
+    )
+      .then((data) => {
+        if (!cancelled) setIsAdmin(Boolean(data.isAdmin));
+      })
+      .catch(() => {
+        if (!cancelled) setIsAdmin(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authLoading, user?.id]);
+
+  const navItems = useMemo(
+    () => NAV_ITEMS.filter((item) => !('adminOnly' in item && item.adminOnly) || isAdmin),
+    [isAdmin]
+  );
 
   return (
     <header className="relative z-20 border-b border-white/[0.06] bg-[#040d1a]/70 backdrop-blur-md">
       <div className="container mx-auto flex max-w-6xl items-center justify-between gap-2 px-3 py-2 sm:px-4 sm:py-2.5">
         <Link
           href="/"
+          prefetch={false}
           className="shrink-0 font-mono text-[10px] tracking-[0.2em] sm:tracking-[0.35em] text-blue-400/50 uppercase hover:text-blue-400/70 transition-colors"
         >
           <span className="sm:hidden">D·OS</span>
@@ -39,12 +78,15 @@ export default function AppHeader() {
           className="flex items-center flex-nowrap shrink-0 gap-0.5 rounded-xl border border-white/[0.06] bg-white/[0.02] p-0.5 sm:gap-1 sm:p-1"
           aria-label="主导航"
         >
-          {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
-            const active = pathname === href || pathname.startsWith(`${href}/`);
+          {navItems.map((item) => {
+            const { href, label, icon: Icon } = item;
+            const exact = 'exact' in item && item.exact;
+            const active = isNavActive(pathname, href, exact);
             return (
               <Link
                 key={href}
                 href={href}
+                prefetch={false}
                 className={navLinkClass(active)}
                 title={label}
                 aria-current={active ? 'page' : undefined}

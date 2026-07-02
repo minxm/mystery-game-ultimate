@@ -65,13 +65,6 @@ function getMemoryStore(): Map<string, CaseJobRecord> {
   return globalForCaseJobs.__caseJobMemoryStore;
 }
 
-function isNetlifyBlobsAvailable(): boolean {
-  return (
-    typeof process.env.NETLIFY_BLOBS_CONTEXT === 'string' ||
-    (process.env.NETLIFY === 'true' && typeof process.env.SITE_ID === 'string')
-  );
-}
-
 function isSupabaseJobsAvailable(): boolean {
   return isSupabaseConfigured() && Boolean(getSupabaseServiceRoleKey());
 }
@@ -92,11 +85,6 @@ export async function setCaseJob(
     const { supabaseSetCaseJob } = await import('@/lib/supabase/jobs');
     supabaseOk = await supabaseSetCaseJob(jobId, record, resolvedMeta?.userId, resolvedMeta?.difficulty);
   }
-  if (isNetlifyBlobsAvailable()) {
-    const { getStore } = await import('@netlify/blobs');
-    const store = getStore('case-jobs');
-    await store.setJSON(jobId, record);
-  }
   if (shouldMirrorToMemory() || !supabaseOk) {
     getMemoryStore().set(jobId, record);
   }
@@ -112,11 +100,6 @@ export async function getCaseJob(jobId: string): Promise<CaseJobRecord | null> {
     const { supabaseGetCaseJob } = await import('@/lib/supabase/jobs');
     const fromDb = await supabaseGetCaseJob(jobId);
     if (fromDb) return fromDb;
-  }
-  if (isNetlifyBlobsAvailable()) {
-    const { getStore } = await import('@netlify/blobs');
-    const store = getStore('case-jobs');
-    return store.get(jobId, { type: 'json' });
   }
   return getMemoryStore().get(jobId) ?? null;
 }

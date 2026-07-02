@@ -17,15 +17,23 @@ function resolveApiKey(): { key: string; source: string } {
   return { key: '', source: 'none' };
 }
 
+export function isCloudflareEnv(): boolean {
+  return (
+    process.env.CLOUDFLARE === 'true' ||
+    process.env.CF_PAGES === '1' ||
+    typeof process.env.CF_PAGES_URL === 'string'
+  );
+}
+
 export function isServerlessEnv(): boolean {
   return (
-    process.env.NETLIFY === 'true' ||
+    isCloudflareEnv() ||
     process.env.VERCEL === '1' ||
     process.env.AWS_LAMBDA_FUNCTION_NAME !== undefined
   );
 }
 
-/** Serverless 环境 AI 生成较慢，需要更长超时（Netlify 函数上限 60s） */
+/** Serverless 环境 AI 生成较慢，需要更长超时 */
 export function getCaseGenerationTimeoutMs(): number {
   const configured = process.env.AI_CASE_TIMEOUT_MS;
   if (configured) {

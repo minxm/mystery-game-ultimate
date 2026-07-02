@@ -72,6 +72,17 @@ export interface GameProgress {
   score?: number;
 }
 
+/** 案件评分结果（本地持久化 + 档案页） */
+export interface CaseEvaluation {
+  score: number;
+  breakdown: Record<string, number>;
+  feedback: string;
+  rating: string;
+  killerCorrect?: boolean;
+  missedClues: string[];
+  userDeduction?: string;
+}
+
 export interface InterrogationMessage {
   role: 'user' | 'assistant';
   content: string;

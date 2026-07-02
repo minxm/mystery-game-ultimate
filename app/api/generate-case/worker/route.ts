@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { executeCaseGenerationJob } from '@/lib/case-generation-job';
 
-/** 本地/Vercel worker：无总超时，由前端轮询等待 */
+/** Cloudflare Workers / 本地 worker：无总超时，由前端轮询等待 */
 export const maxDuration = 600;
 
 export async function POST(request: NextRequest) {

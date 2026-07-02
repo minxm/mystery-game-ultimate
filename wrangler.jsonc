@@ -1,0 +1,31 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "main": ".open-next/worker.js",
+  "name": "mystery-game",
+  "compatibility_date": "2026-07-02",
+  "compatibility_flags": [
+    "nodejs_compat",
+    "global_fetch_strictly_public"
+  ],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "services": [
+    {
+      "binding": "WORKER_SELF_REFERENCE",
+      "service": "mystery-game"
+    }
+  ],
+  "vars": {
+    "CLOUDFLARE": "true",
+    "AI_GENERATE_IMAGES": "true"
+  },
+  "r2_buckets": [
+    // 启用 Next.js 增量缓存：在 Cloudflare Dashboard 创建 R2 桶后取消注释并填入 bucket_name
+    // { "binding": "NEXT_INC_CACHE_R2_BUCKET", "bucket_name": "mystery-game-cache" }
+  ],
+  "images": {
+    "binding": "IMAGES"
+  }
+}

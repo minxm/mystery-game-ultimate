@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUserId } from '@/lib/supabase/server';
-import { createShareToken, loadCaseByShareToken } from '@/lib/supabase/database';
+import {
+  createShareToken,
+  loadCaseByShareToken,
+  loadCaseFromDb,
+  saveCaseToDb,
+} from '@/lib/supabase/database';
+import type { CaseData } from '@/lib/types';
 
 export async function POST(request: NextRequest) {
   const userId = await getSessionUserId();
@@ -8,9 +14,23 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: '请先登录' }, { status: 401 });
   }
 
-  const { caseId } = await request.json();
+  const body = await request.json();
+  const caseId = body.caseId as string | undefined;
+  const caseData = body.caseData as CaseData | undefined;
   if (!caseId) {
     return NextResponse.json({ success: false, error: '缺少 caseId' }, { status: 400 });
+  }
+
+  let exists = await loadCaseFromDb(caseId);
+  if (!exists && caseData?.id === caseId) {
+    const saved = await saveCaseToDb(caseData, userId, { isPublic: true });
+    if (saved) exists = caseData;
+  }
+  if (!exists) {
+    return NextResponse.json(
+      { success: false, error: '案件尚未同步到云端，请稍后重试' },
+      { status: 404 }
+    );
   }
 
   const token = await createShareToken(caseId, userId);

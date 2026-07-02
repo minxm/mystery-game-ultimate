@@ -17,8 +17,8 @@ export interface InventoryStats {
 }
 
 /**
- * 从库存分配一个预生成案件（共享 case_id，多用户可玩同一案件）。
- * 每位用户的「玩过/进度」由 game_progress(user_id, case_id) 单独记录。
+ * 从库存分配一个预生成案件（每位用户独占一条库存记录）。
+ * 领取后标记 status=claimed，并记录 claimed_by / claimed_at。
  */
 export async function claimCaseFromInventory(
   difficulty: string,
@@ -27,37 +27,98 @@ export async function claimCaseFromInventory(
   const admin = createAdminClientSafe();
   if (!admin) return null;
 
-  const { data: rows, error } = await admin
-    .from('case_inventory')
-    .select('id, case_id, cases!inner(case_data)')
-    .eq('difficulty', difficulty)
-    .eq('status', 'available')
-    .order('created_at', { ascending: true })
-    .limit(1);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const { data: rows, error } = await admin
+      .from('case_inventory')
+      .select('id, case_id, cases!inner(case_data)')
+      .eq('difficulty', difficulty)
+      .eq('status', 'available')
+      .order('created_at', { ascending: true })
+      .limit(1);
 
-  if (error || !rows?.length) return null;
+    if (error || !rows?.length) return null;
 
-  const row = rows[0] as {
-    id: string;
-    case_id: string;
-    cases: { case_data: CaseData } | { case_data: CaseData }[] | null;
-  };
+    const row = rows[0] as {
+      id: string;
+      case_id: string;
+      cases: { case_data: CaseData } | { case_data: CaseData }[] | null;
+    };
 
-  const caseRow = Array.isArray(row.cases) ? row.cases[0] : row.cases;
-  if (!caseRow?.case_data) return null;
+    const caseRow = Array.isArray(row.cases) ? row.cases[0] : row.cases;
+    if (!caseRow?.case_data) return null;
 
-  const caseData = {
-    ...caseRow.case_data,
-    id: row.case_id,
-  } as CaseData;
+    const claimedAt = new Date().toISOString();
+    const { data: updated, error: updateError } = await admin
+      .from('case_inventory')
+      .update({
+        status: 'claimed',
+        claimed_by: userId ?? null,
+        claimed_at: claimedAt,
+      })
+      .eq('id', row.id)
+      .eq('status', 'available')
+      .select('id')
+      .maybeSingle();
 
-  void incrementCasePlayCount(row.case_id);
-  await logActivity(userId ?? null, 'case_from_inventory', {
-    caseId: row.case_id,
-    difficulty,
-  });
+    if (updateError) {
+      console.warn('[Inventory] claim update failed:', updateError.message);
+      return null;
+    }
+    if (!updated) continue;
 
-  return caseData;
+    const caseData = {
+      ...caseRow.case_data,
+      id: row.case_id,
+    } as CaseData;
+
+    void incrementCasePlayCount(row.case_id);
+    await logActivity(userId ?? null, 'case_from_inventory', {
+      caseId: row.case_id,
+      difficulty,
+    });
+
+    return caseData;
+  }
+
+  return null;
+}
+
+/** 将仍为 available 但已有领取日志的库存记录回填为 claimed（兼容历史数据） */
+export async function backfillInventoryClaims(): Promise<void> {
+  const admin = createAdminClientSafe();
+  if (!admin) return;
+
+  const { data: logs, error } = await admin
+    .from('activity_logs')
+    .select('user_id, metadata, created_at')
+    .eq('action', 'case_from_inventory')
+    .order('created_at', { ascending: false });
+
+  if (error || !logs?.length) return;
+
+  const latestClaimByCaseId = new Map<string, { userId: string | null; claimedAt: string }>();
+  for (const log of logs) {
+    const caseId = (log.metadata as { caseId?: string } | null)?.caseId;
+    if (!caseId || latestClaimByCaseId.has(caseId)) continue;
+    latestClaimByCaseId.set(caseId, {
+      userId: log.user_id ?? null,
+      claimedAt: log.created_at,
+    });
+  }
+
+  await Promise.all(
+    [...latestClaimByCaseId.entries()].map(([caseId, claim]) =>
+      admin
+        .from('case_inventory')
+        .update({
+          status: 'claimed',
+          claimed_by: claim.userId,
+          claimed_at: claim.claimedAt,
+        })
+        .eq('case_id', caseId)
+        .eq('status', 'available')
+    )
+  );
 }
 
 /** 查询指定难度是否有可用库存（仅读，不领取） */

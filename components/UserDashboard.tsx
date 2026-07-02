@@ -1,105 +1,217 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
-import { FolderOpen, Flame, Star, Trophy, ChevronRight, ChevronLeft, CheckCircle2, Radar, FileSearch, Sparkles } from 'lucide-react';
+import { ChevronRight, ChevronLeft, CheckCircle2, Radar, FileSearch, Sparkles } from 'lucide-react';
+import { usePathname } from 'next/navigation';
 import { useAuth } from './AuthProvider';
-import { useCloudSync } from './CloudSyncProvider';
+import { authenticatedFetch } from '@/lib/authenticated-fetch';
 import { saveCaseData, storage } from '@/lib/utils';
-import type { CaseData, GameProgress, UserStats } from '@/lib/types';
+import type { CaseData, GameProgress, CaseEvaluation } from '@/lib/types';
 
-const EMPTY_STATS: UserStats = {
-  casesCompleted: 0,
-  averageScore: 0,
-  perfectSolves: 0,
-  achievements: [],
-  streak: 0,
+type CaseCarouselItem = {
+  caseData: CaseData;
+  index: number;
+  done?: boolean;
+  inProgress?: boolean;
+  score?: number;
 };
 
-export function UserStatsBar() {
-  const { user, isConfigured } = useAuth();
-  const { syncing, lastSyncedAt } = useCloudSync();
-  const [mounted, setMounted] = useState(false);
-  const [stats, setStats] = useState(EMPTY_STATS);
+type RawCaseItem = {
+  caseData: CaseData;
+  done?: boolean;
+  score?: number;
+  progress?: GameProgress | null;
+  evaluation?: CaseEvaluation | null;
+};
+
+interface HomeDashboardContextValue {
+  recommended: CaseCarouselItem[];
+  played: CaseCarouselItem[];
+  recommendedLoading: boolean;
+  playedLoading: boolean;
+}
+
+const HomeDashboardContext = createContext<HomeDashboardContextValue>({
+  recommended: [],
+  played: [],
+  recommendedLoading: false,
+  playedLoading: false,
+});
+
+function resolvePlayedCaseStatus(item: RawCaseItem) {
+  const caseId = item.caseData.id;
+  const localProgress = storage.getProgress(caseId);
+  const localEval = storage.getEvaluation(caseId);
+  const progress = item.progress ?? localProgress;
+
+  const done =
+    item.done === true ||
+    item.evaluation != null ||
+    localEval != null ||
+    progress?.score != null ||
+    progress?.endTime != null;
+
+  const score =
+    item.evaluation?.score ??
+    item.score ??
+    localEval?.score ??
+    progress?.score;
+
+  const inProgress = !done && progress != null;
+
+  return { done, score, inProgress, progress };
+}
+
+function resolveCaseContinueHref(caseId: string, done?: boolean): string {
+  if (done) return `/archive/${caseId}`;
+  const progress = storage.getProgress(caseId);
+  if (!progress) return `/case/${caseId}`;
+  const investigating =
+    progress.discoveredEvidence.length > 0 ||
+    progress.interrogatedSuspects.length > 0;
+  return investigating ? `/investigate/${caseId}` : `/case/${caseId}`;
+}
+
+function mapCaseItems(raw: RawCaseItem[]): CaseCarouselItem[] {
+  return raw.map((item, index) => {
+    const { done, score, inProgress } = resolvePlayedCaseStatus(item);
+    return {
+      caseData: item.caseData,
+      index,
+      done,
+      score,
+      inProgress,
+    };
+  });
+}
+
+async function cacheCasesLocally(items: RawCaseItem[]) {
+  for (const item of items) {
+    if (!item.caseData.suspects?.length) continue;
+    try {
+      await saveCaseData(item.caseData);
+      if (item.progress) storage.saveProgress(item.progress);
+    } catch {
+      // 本地缓存失败不影响列表展示
+    }
+  }
+}
+
+const recommendedInflight = new Map<string, Promise<RawCaseItem[]>>();
+const playedInflight = new Map<string, Promise<RawCaseItem[]>>();
+
+async function fetchRecommendedCases(): Promise<RawCaseItem[]> {
+  const key = 'default';
+  const existing = recommendedInflight.get(key);
+  if (existing) return existing;
+
+  const promise = (async (): Promise<RawCaseItem[]> => {
+    const res = await fetch('/api/cases/recommended');
+    const json = await res.json();
+    return res.ok && json.success && Array.isArray(json.items)
+      ? (json.items as RawCaseItem[])
+      : [];
+  })().finally(() => {
+    recommendedInflight.delete(key);
+  });
+
+  recommendedInflight.set(key, promise);
+  return promise;
+}
+
+async function fetchPlayedCases(userId: string): Promise<RawCaseItem[]> {
+  const existing = playedInflight.get(userId);
+  if (existing) return existing;
+
+  const promise = (async (): Promise<RawCaseItem[]> => {
+    const res = await authenticatedFetch('/api/cases/played');
+    const json = await res.json();
+    return res.ok && json.success && Array.isArray(json.items)
+      ? (json.items as RawCaseItem[])
+      : [];
+  })().finally(() => {
+    playedInflight.delete(userId);
+  });
+
+  playedInflight.set(userId, promise);
+  return promise;
+}
+
+export function HomeDashboardProvider({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  const { user, isConfigured, loading: authLoading } = useAuth();
+  const [recommended, setRecommended] = useState<CaseCarouselItem[]>([]);
+  const [played, setPlayed] = useState<CaseCarouselItem[]>([]);
+  const [recommendedLoading, setRecommendedLoading] = useState(true);
+  const [playedLoading, setPlayedLoading] = useState(true);
 
   useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  useEffect(() => {
-    if (!mounted) return;
+    if (authLoading || pathname !== '/') return;
 
     let cancelled = false;
 
     (async () => {
-      try {
-        if (user && isConfigured) {
-          const res = await fetch('/api/user/stats');
-          const data = await res.json();
+      if (!isConfigured) {
+        setRecommended([]);
+        setPlayed([]);
+        setRecommendedLoading(false);
+        setPlayedLoading(false);
+        return;
+      }
+
+      setRecommendedLoading(true);
+      setPlayedLoading(!!user);
+
+      void (async () => {
+        try {
+          const raw = await fetchRecommendedCases();
           if (cancelled) return;
-
-          if (res.ok && data.success && data.stats) {
-            setStats(data.stats as UserStats);
-            return;
-          }
-
-          setStats(EMPTY_STATS);
-          return;
+          setRecommended(mapCaseItems(raw));
+          void cacheCasesLocally(raw);
+        } catch {
+          if (!cancelled) setRecommended([]);
+        } finally {
+          if (!cancelled) setRecommendedLoading(false);
         }
+      })();
 
-        setStats(storage.getStats());
-      } catch {
-        if (!cancelled) setStats(user ? EMPTY_STATS : storage.getStats());
+      if (user) {
+        void (async () => {
+          try {
+            const raw = await fetchPlayedCases(user.id);
+            if (cancelled) return;
+            setPlayed(mapCaseItems(raw));
+            void cacheCasesLocally(raw);
+          } catch {
+            if (!cancelled) setPlayed([]);
+          } finally {
+            if (!cancelled) setPlayedLoading(false);
+          }
+        })();
+      } else {
+        setPlayed([]);
+        setPlayedLoading(false);
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [mounted, user, isConfigured, lastSyncedAt]);
-
-  if (!mounted || stats.casesCompleted === 0) return null;
+  }, [isConfigured, user?.id, authLoading, pathname]);
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="flex flex-wrap items-center justify-center gap-4 mb-8 px-4 py-3 rounded-xl border border-white/[0.06] bg-white/[0.02]"
+    <HomeDashboardContext.Provider
+      value={{ recommended, played, recommendedLoading, playedLoading }}
     >
-      {isConfigured && user && syncing && (
-        <span className="text-[10px] font-mono text-blue-400/60 animate-pulse">同步云端…</span>
-      )}
-      <StatItem icon={FolderOpen} label="已完成" value={String(stats.casesCompleted)} />
-      <StatItem icon={Star} label="均分" value={Math.round(stats.averageScore).toString()} />
-      {stats.perfectSolves > 0 && (
-        <StatItem icon={Trophy} label="完美推理" value={String(stats.perfectSolves)} />
-      )}
-      {stats.streak > 0 && (
-        <StatItem icon={Flame} label="连胜" value={String(stats.streak)} accent />
-      )}
-    </motion.div>
+      {children}
+    </HomeDashboardContext.Provider>
   );
 }
 
-function StatItem({
-  icon: Icon,
-  label,
-  value,
-  accent,
-}: {
-  icon: React.ComponentType<{ className?: string }>;
-  label: string;
-  value: string;
-  accent?: boolean;
-}) {
-  return (
-    <div className="flex items-center gap-2 text-sm">
-      <Icon className={`w-4 h-4 ${accent ? 'text-orange-400' : 'text-blue-400/70'}`} />
-      <span className="text-white/40 text-xs">{label}</span>
-      <span className={`font-bold ${accent ? 'text-orange-300' : 'text-white/90'}`}>{value}</span>
-    </div>
-  );
+function useHomeDashboard() {
+  return useContext(HomeDashboardContext);
 }
 
 const DIFFICULTY_META: Record<
@@ -153,7 +265,7 @@ function CaseCard({
 }) {
   const diff = DIFFICULTY_META[caseData.difficulty] ?? DIFFICULTY_META.medium;
   const caseNo = caseData.id.slice(-6).toUpperCase();
-  const href = done ? `/archive/${caseData.id}` : `/case/${caseData.id}`;
+  const href = resolveCaseContinueHref(caseData.id, done);
 
   return (
     <Link href={href} className="group recent-case-card h-full">
@@ -213,7 +325,7 @@ function CaseCard({
                 调查中
               </span>
               <span className="inline-flex items-center gap-0.5 text-[10px] text-blue-400/60 group-hover:text-blue-300 transition-colors">
-                继续
+                继续游戏
                 <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
               </span>
             </>
@@ -235,7 +347,7 @@ function CaseCard({
                 调查中
               </span>
               <span className="inline-flex items-center gap-0.5 text-[10px] text-blue-400/60 group-hover:text-blue-300 transition-colors">
-                继续
+                继续游戏
                 <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
               </span>
             </>
@@ -329,14 +441,6 @@ function CasesCarousel({
   );
 }
 
-type CaseCarouselItem = {
-  caseData: CaseData;
-  index: number;
-  done?: boolean;
-  inProgress?: boolean;
-  score?: number;
-};
-
 function CasesSection({
   label,
   title,
@@ -344,6 +448,7 @@ function CasesSection({
   items,
   variant,
   delay = 0.45,
+  loading = false,
 }: {
   label: string;
   title: string;
@@ -351,8 +456,9 @@ function CasesSection({
   items: CaseCarouselItem[];
   variant: 'recommended' | 'played';
   delay?: number;
+  loading?: boolean;
 }) {
-  if (items.length === 0) return null;
+  if (loading || items.length === 0) return null;
 
   return (
     <motion.section
@@ -412,144 +518,34 @@ function CasesSection({
   );
 }
 
-async function cacheCasesLocally(
-  items: Array<{ caseData: CaseData; progress?: GameProgress | null }>
-) {
-  for (const item of items) {
-    await saveCaseData(item.caseData);
-    if (item.progress) storage.saveProgress(item.progress);
-  }
-}
-
 export function RecommendedCasesPanel() {
-  const { isConfigured } = useAuth();
-  const { lastSyncedAt } = useCloudSync();
-  const [items, setItems] = useState<CaseCarouselItem[]>([]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    (async () => {
-      if (!isConfigured) {
-        setItems([]);
-        return;
-      }
-      try {
-        const res = await fetch('/api/cases/recommended');
-        const data = await res.json();
-        if (cancelled) return;
-        if (!res.ok || !data.success || !Array.isArray(data.items)) {
-          setItems([]);
-          return;
-        }
-        const raw = data.items as Array<{
-          caseData: CaseData;
-          done?: boolean;
-          score?: number;
-          progress?: GameProgress | null;
-        }>;
-        await cacheCasesLocally(raw);
-        setItems(
-          raw.map((item, index) => {
-            const local = storage.getProgress(item.caseData.id);
-            const done = item.done ?? local?.score !== undefined;
-            const score = item.score ?? local?.score;
-            const inProgress = !done && (!!item.progress || !!local);
-            return {
-              caseData: item.caseData,
-              index,
-              done,
-              score,
-              inProgress,
-            };
-          })
-        );
-      } catch {
-        if (!cancelled) setItems([]);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [isConfigured, lastSyncedAt]);
+  const { recommended, recommendedLoading } = useHomeDashboard();
 
   return (
     <CasesSection
       label="FEATURED"
       title="推荐"
       titleAccent="案件"
-      items={items}
+      items={recommended}
       variant="recommended"
       delay={0.45}
+      loading={recommendedLoading}
     />
   );
 }
 
 export function PlayedCasesPanel() {
-  const { user, isConfigured } = useAuth();
-  const { lastSyncedAt } = useCloudSync();
-  const [items, setItems] = useState<CaseCarouselItem[]>([]);
-
-  useEffect(() => {
-    if (!user || !isConfigured) {
-      setItems([]);
-      return;
-    }
-
-    let cancelled = false;
-
-    (async () => {
-      try {
-        const res = await fetch('/api/cases/played');
-        const data = await res.json();
-        if (cancelled) return;
-        if (!res.ok || !data.success || !Array.isArray(data.items)) {
-          setItems([]);
-          return;
-        }
-
-        const raw = data.items as Array<{
-          caseData: CaseData;
-          done: boolean;
-          score?: number;
-          progress?: GameProgress | null;
-        }>;
-
-        await cacheCasesLocally(raw);
-        setItems(
-          raw.map((item, index) => {
-            const local = storage.getProgress(item.caseData.id);
-            const done = item.done ?? local?.score !== undefined;
-            const score = item.score ?? local?.score;
-            const inProgress = !done && (!!item.progress || !!local);
-            return {
-              caseData: item.caseData,
-              index,
-              done,
-              score,
-              inProgress,
-            };
-          })
-        );
-      } catch {
-        if (!cancelled) setItems([]);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [user, isConfigured, lastSyncedAt]);
+  const { played, playedLoading } = useHomeDashboard();
 
   return (
     <CasesSection
       label="YOUR CASES"
       title="最近"
       titleAccent="游玩"
-      items={items}
+      items={played}
       variant="played"
       delay={0.55}
+      loading={playedLoading}
     />
   );
 }
@@ -557,9 +553,9 @@ export function PlayedCasesPanel() {
 /** @deprecated 使用 RecommendedCasesPanel + PlayedCasesPanel */
 export function RecentCasesPanel() {
   return (
-    <>
+    <HomeDashboardProvider>
       <RecommendedCasesPanel />
       <PlayedCasesPanel />
-    </>
+    </HomeDashboardProvider>
   );
 }

@@ -1,13 +1,13 @@
 # Supabase 集成指南
 
-本项目支持 **Supabase 全栈后端**，与 Netlify 前端部署配合使用。
+本项目支持 **Supabase 全栈后端**，与 Cloudflare Workers 前端部署配合使用。
 
 ## 架构
 
 ```
 ┌─────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│   Netlify   │────▶│  Next.js + API   │────▶│  SiliconFlow AI │
-│  CDN + SSR  │     │  Netlify Funcs   │     │  案件/审问/评分  │
+│  Cloudflare │────▶│  Next.js + API   │────▶│  SiliconFlow AI │
+│ Workers+CDN │     │  Worker Routes   │     │  案件/审问/评分  │
 └─────────────┘     └────────┬─────────┘     └─────────────────┘
                              │
               ┌──────────────┼──────────────┐
@@ -42,7 +42,7 @@ supabase/migrations/000_combined_all.sql
 supabase/migrations/20250701000001_table_grants.sql
 ```
 
-同时确认 `.env.local` / Netlify 环境变量中：
+同时确认 `.env.local` / Cloudflare Workers 环境变量中：
 
 - `SUPABASE_SERVICE_ROLE_KEY` 使用的是 **service_role** 密钥（Project Settings → API → `service_role` secret）
 - 不要误填 `anon` public key
@@ -59,10 +59,10 @@ npm run setup:supabase
 或 Git Bash：
 
 ```bash
-bash scripts/setup-supabase-netlify.sh
+bash scripts/setup-supabase-cloudflare.sh
 ```
 
-脚本会引导你填写 Supabase Keys、写入 `.env.local`、同步 Netlify 环境变量。
+脚本会引导你填写 Supabase Keys、写入 `.env.local`、同步 Cloudflare Workers 密钥。
 
 **方式 B：手动配置**
 
@@ -74,14 +74,14 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
 SUPABASE_SERVICE_ROLE_KEY=eyJ...
 ```
 
-Netlify 部署时，在 **Site settings → Environment variables** 添加相同变量。
+Cloudflare 部署时，在 **Workers → Settings → Variables and Secrets** 添加相同变量。详见 [DEPLOY-CLOUDFLARE.md](./DEPLOY-CLOUDFLARE.md)。
 
 ### 3. 配置 Auth
 
 Supabase Dashboard → Authentication → URL Configuration：
 
-- Site URL: `https://your-domain.netlify.app`
-- Redirect URLs: `https://your-domain.netlify.app/auth/callback`
+- Site URL: `https://your-domain.workers.dev`（或自定义域名）
+- Redirect URLs: `https://your-domain.workers.dev/auth/callback`
 
 启用 GitHub / Google / Email (Magic Link) / Phone (SMS) 提供商。
 
@@ -108,7 +108,7 @@ cd conan-ai-db && git add . && git commit -m "Add initial schema" && git push
 |------|----------------|---------------|
 | 游戏 | IndexedDB + localStorage | 同上 + 云同步 |
 | 登录 | 匿名 | GitHub / Google / Magic Link / 手机验证码 |
-| 案件生成队列 | Netlify Blobs / 内存 | + Postgres 表 + Realtime |
+| 案件生成队列 | Supabase Postgres / 内存 | Realtime 进度推送 |
 | **案件库存** | 每次现场 AI 生成 | 预生成池，秒开体验 |
 | AI 图片 | base64 存 IndexedDB | 上传 Storage，存 URL |
 | **AI 调用日志** | 仅 console | `ai_call_logs` 表 + `/monitor` |
@@ -135,7 +135,7 @@ cd conan-ai-db && git add . && git commit -m "Add initial schema" && git push
 
 ## 案件库存（预生成）
 
-Cron / 外部脚本调用补货 API，secret **仅存 Netlify 环境变量**，使用标准 Bearer 头：
+Cron / 外部脚本调用补货 API，secret **仅存 Cloudflare Workers 密钥**，使用标准 Bearer 头：
 
 ```bash
 # 查看库存（生产环境需 Bearer）

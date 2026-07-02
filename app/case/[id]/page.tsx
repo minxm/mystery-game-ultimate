@@ -5,10 +5,12 @@ import { useRouter, useParams } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { Search, Users, Clock, ArrowRight, Skull, AlertTriangle, Eye } from 'lucide-react';
 import { CaseData } from '@/lib/types';
-import { storage, loadCaseData, saveCaseData } from '@/lib/utils';
+import { storage, loadCaseData } from '@/lib/utils';
 import { syncProgress } from '@/lib/cloud-sync';
-import { getAvatarPlaceholder, getScenePlaceholder } from '@/lib/placeholder';
+import { getScenePlaceholder } from '@/lib/placeholder';
 import ParticleBackground from '@/components/ParticleBackground';
+import { CharacterPortrait } from '@/components/CharacterPortrait';
+import { scrollWindowToTop } from '@/components/ScrollToTop';
 import Image from 'next/image';
 
 const DIFFICULTY_LABEL: Record<string, string> = {
@@ -37,23 +39,15 @@ export default function CasePage() {
     setBrokenImages((prev) => new Set([...prev, id]));
 
   useEffect(() => {
+    scrollWindowToTop();
+  }, [params.id]);
+
+  useEffect(() => {
     const caseId = params.id as string;
     let cancelled = false;
 
     (async () => {
-      let data = await loadCaseData(caseId);
-      if (!data) {
-        try {
-          const res = await fetch(`/api/cases/${encodeURIComponent(caseId)}`);
-          const json = await res.json();
-          if (res.ok && json.success && json.caseData) {
-            data = json.caseData as CaseData;
-            await saveCaseData(data);
-          }
-        } catch {
-          /* fallback failed */
-        }
-      }
+      const data = await loadCaseData(caseId);
       if (cancelled) return;
 
       if (data) {
@@ -70,9 +64,14 @@ export default function CasePage() {
           };
           storage.saveProgress(newProgress);
           void syncProgress(newProgress);
+        } else {
+          void syncProgress(progress);
         }
       }
       setLoading(false);
+      if (data) {
+        requestAnimationFrame(() => scrollWindowToTop());
+      }
     })();
 
     return () => {
@@ -195,21 +194,14 @@ export default function CasePage() {
             {/* 头像 */}
             <div className="md:col-span-1">
               <div className="relative w-full aspect-square rounded-xl overflow-hidden border-2 border-blue-500/40 shadow-[0_0_30px_rgba(30,144,255,0.2)]">
-                {caseData.victim.imageUrl && !brokenImages.has('victim') ? (
-                  <Image
-                    src={caseData.victim.imageUrl}
-                    alt={caseData.victim.name}
-                    fill
-                    className="object-cover"
-                    unoptimized
-                    onError={() => markBroken('victim')}
-                  />
-                ) : (
-                  <div
-                    className="w-full h-full bg-cover bg-center"
-                    style={{ backgroundImage: `url("${getAvatarPlaceholder(caseData.victim.name)}")` }}
-                  />
-                )}
+                <CharacterPortrait
+                  name={caseData.victim.name}
+                  imageUrl={caseData.victim.imageUrl}
+                  className="w-full h-full"
+                  imageClassName="object-cover"
+                  broken={brokenImages.has('victim')}
+                  onBroken={() => markBroken('victim')}
+                />
                 {/* 扫描覆盖层 */}
                 <div className="absolute inset-0 bg-gradient-to-t from-dark-900/60 to-transparent pointer-events-none" />
                 <div className="absolute bottom-2 left-2 right-2 text-center">
@@ -321,21 +313,14 @@ export default function CasePage() {
 
                   {/* 头像（证件照风格，名字压在底部） */}
                   <div className={`relative z-[1] w-full aspect-[4/5] rounded-xl overflow-hidden border-2 border-blue-500/25 ${accent.hoverBorder} transition-colors duration-300`}>
-                    {suspect.imageUrl && !brokenImages.has(`suspect-${index}`) ? (
-                      <Image
-                        src={suspect.imageUrl}
-                        alt={suspect.name}
-                        fill
-                        className="object-cover transition-transform duration-500 group-hover:scale-110"
-                        unoptimized
-                        onError={() => markBroken(`suspect-${index}`)}
-                      />
-                    ) : (
-                      <div
-                        className="w-full h-full bg-cover bg-center transition-transform duration-500 group-hover:scale-110"
-                        style={{ backgroundImage: `url("${getAvatarPlaceholder(suspect.name)}")` }}
-                      />
-                    )}
+                    <CharacterPortrait
+                      name={suspect.name}
+                      imageUrl={suspect.imageUrl}
+                      className="w-full h-full transition-transform duration-500 group-hover:scale-110"
+                      imageClassName="object-cover transition-transform duration-500 group-hover:scale-110"
+                      broken={brokenImages.has(`suspect-${index}`)}
+                      onBroken={() => markBroken(`suspect-${index}`)}
+                    />
                     {/* 扫描格栅 + 暗角 */}
                     <div className="absolute inset-0 bg-gradient-to-t from-dark-900 via-dark-900/30 to-transparent" />
                     <div className="absolute inset-0 opacity-[0.07] pointer-events-none"

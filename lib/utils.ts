@@ -1,11 +1,16 @@
-import { CaseData, GameProgress, InterrogationMessage, UserStats } from './types';
+import { CaseData, GameProgress, InterrogationMessage, UserStats, CaseEvaluation } from './types';
 import { clearCaseStore, loadCaseDataById, saveCaseData } from './case-store';
+import {
+  caseDataHasMissingCharacterImages,
+  mergeCaseCharacterImages,
+} from './case-image-merge';
 import { computeAchievements, computeStreak } from './achievements';
 
 const STORAGE_KEYS = {
   PROGRESS: 'mystery_progress',
   STATS: 'mystery_stats',
   INTERROGATIONS: 'mystery_interrogations',
+  EVALUATIONS: 'mystery_evaluations',
 };
 
 export const storage = {
@@ -118,15 +123,36 @@ export const storage = {
     return data ? JSON.parse(data) : {};
   },
 
+  saveEvaluation(caseId: string, evaluation: CaseEvaluation, userDeduction?: string): void {
+    if (typeof window === 'undefined') return;
+    const all = this.getAllEvaluations();
+    all[caseId] = {
+      ...evaluation,
+      userDeduction: userDeduction ?? evaluation.userDeduction,
+    };
+    localStorage.setItem(STORAGE_KEYS.EVALUATIONS, JSON.stringify(all));
+  },
+
+  getEvaluation(caseId: string): CaseEvaluation | null {
+    if (typeof window === 'undefined') return null;
+    return this.getAllEvaluations()[caseId] ?? null;
+  },
+
+  getAllEvaluations(): Record<string, CaseEvaluation> {
+    if (typeof window === 'undefined') return {};
+    const data = localStorage.getItem(STORAGE_KEYS.EVALUATIONS);
+    return data ? JSON.parse(data) : {};
+  },
+
   // 清除数据
   clearAll(): void {
-    if (typeof window !== 'undefined') {
-      void clearCaseStore();
-      localStorage.removeItem('mystery_cases');
-      localStorage.removeItem(STORAGE_KEYS.PROGRESS);
-      localStorage.removeItem(STORAGE_KEYS.STATS);
-      localStorage.removeItem(STORAGE_KEYS.INTERROGATIONS);
-    }
+    if (typeof window === 'undefined') return;
+    void clearCaseStore();
+    localStorage.removeItem('mystery_cases');
+    localStorage.removeItem(STORAGE_KEYS.PROGRESS);
+    localStorage.removeItem(STORAGE_KEYS.STATS);
+    localStorage.removeItem(STORAGE_KEYS.INTERROGATIONS);
+    localStorage.removeItem(STORAGE_KEYS.EVALUATIONS);
   },
 };
 
@@ -134,9 +160,41 @@ export function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 }
 
-/** 从 IndexedDB 加载案件；优先本地 → 云端（登录用户） */
+const loadCaseDataInflight = new Map<string, Promise<CaseData | null>>();
+
+/** 从 IndexedDB 加载案件；本地缺图时拉服务端合并更新 */
 export async function loadCaseData(caseId: string): Promise<CaseData | null> {
+  const existing = loadCaseDataInflight.get(caseId);
+  if (existing) return existing;
+
+  const promise = loadCaseDataOnce(caseId).finally(() => {
+    loadCaseDataInflight.delete(caseId);
+  });
+
+  loadCaseDataInflight.set(caseId, promise);
+  return promise;
+}
+
+async function loadCaseDataOnce(caseId: string): Promise<CaseData | null> {
   const local = await loadCaseDataById(caseId);
+
+  if (local && !caseDataHasMissingCharacterImages(local)) {
+    return local;
+  }
+
+  try {
+    const res = await fetch(`/api/cases/${encodeURIComponent(caseId)}`);
+    const json = await res.json();
+    if (res.ok && json.success && json.caseData) {
+      const remote = json.caseData as CaseData;
+      const merged = local ? mergeCaseCharacterImages(local, remote) : remote;
+      await saveCaseData(merged);
+      return merged;
+    }
+  } catch {
+    // 网络失败时继续用本地
+  }
+
   if (local) return local;
 
   const { fetchCaseFromCloud } = await import('./cloud-sync');
@@ -279,4 +337,34 @@ export function getScoreRating(
     color: 'text-red-400',
     description: '真凶逍遥法外，无辜者蒙冤...'
   };
+}
+
+export type InvestigateTab = 'evidence' | 'suspects' | 'timeline';
+
+const INVESTIGATE_TABS = new Set<InvestigateTab>(['evidence', 'suspects', 'timeline']);
+
+function parseInvestigateTab(value: string | null | undefined): InvestigateTab | null {
+  if (value && INVESTIGATE_TABS.has(value as InvestigateTab)) {
+    return value as InvestigateTab;
+  }
+  return null;
+}
+
+export function saveInvestigateTab(caseId: string, tab: InvestigateTab): void {
+  if (typeof window === 'undefined') return;
+  sessionStorage.setItem(`investigate-tab-${caseId}`, tab);
+}
+
+export function resolveInvestigateTab(caseId: string): InvestigateTab {
+  if (typeof window !== 'undefined') {
+    const urlTab = parseInvestigateTab(new URLSearchParams(window.location.search).get('tab'));
+    if (urlTab) return urlTab;
+    const stored = parseInvestigateTab(sessionStorage.getItem(`investigate-tab-${caseId}`));
+    if (stored) return stored;
+  }
+  return 'evidence';
+}
+
+export function investigatePageUrl(caseId: string, tab: InvestigateTab = 'suspects'): string {
+  return `/investigate/${caseId}?tab=${tab}`;
 }

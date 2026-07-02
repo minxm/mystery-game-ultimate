@@ -1,7 +1,7 @@
 /**
  * 本地内联 SVG 占位图（data URI）。
  *
- * 线上（Netlify）默认关闭 AI 生图以避免网关超时，过去用 ui-avatars.com 外部服务，
+ * 线上（Cloudflare Workers）默认开启 AI 生图；过去用 ui-avatars.com 外部服务，
  * 国内访问时不时超时/被墙，导致「图片加载失败」。改为内联 SVG data URI 后：
  * - 零网络请求，永不加载失败
  * - 随名字确定性地生成配色，视觉统一又有区分度
@@ -104,4 +104,16 @@ function escapeXml(s: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&apos;');
+}
+
+/** 是否为本地 SVG 文字占位图（非 AI 生图结果） */
+export function isAvatarPlaceholder(url?: string | null): boolean {
+  if (!url) return true;
+  return url.startsWith('data:image/svg+xml');
+}
+
+/** 是否为本地 SVG 现场占位图 */
+export function isScenePlaceholder(url?: string | null): boolean {
+  if (!url) return true;
+  return url.startsWith('data:image/svg+xml');
 }

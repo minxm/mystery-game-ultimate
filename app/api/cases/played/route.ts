@@ -14,8 +14,11 @@ export async function GET() {
       success: true,
       items: items.map(({ caseData, progress, evaluation }) => ({
         caseData,
-        done: progress.score !== undefined,
-        score: progress.score,
+        done:
+          evaluation != null ||
+          progress.score !== undefined ||
+          progress.endTime !== undefined,
+        score: evaluation?.score ?? progress.score,
         progress,
         evaluation,
       })),

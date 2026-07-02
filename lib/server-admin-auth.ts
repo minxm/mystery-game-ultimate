@@ -57,9 +57,9 @@ export function authorizeCronBearer(
  * 监控页 Server Action / RSC 鉴权。
  * 生产环境需配置 ADMIN_USER_IDS（逗号分隔 Supabase user UUID），通过登录态校验，不在 HTTP 中传 secret。
  */
-export async function requireMonitorAccess(): Promise<
-  { allowed: true; userId: string | null } | { allowed: false }
-> {
+export async function requireMonitorAccess(
+  accessToken?: string | null
+): Promise<{ allowed: true; userId: string | null } | { allowed: false }> {
   const adminIds = readServerSecret('ADMIN_USER_IDS')
     ?.split(',')
     .map((id) => id.trim())
@@ -69,11 +69,11 @@ export async function requireMonitorAccess(): Promise<
     if (isProduction()) {
       return { allowed: false };
     }
-    const userId = await getSessionUserId().catch(() => null);
+    const userId = await getSessionUserId(accessToken).catch(() => null);
     return { allowed: true, userId };
   }
 
-  const userId = await getSessionUserId().catch(() => null);
+  const userId = await getSessionUserId(accessToken).catch(() => null);
   if (!userId || !adminIds.includes(userId)) {
     return { allowed: false };
   }

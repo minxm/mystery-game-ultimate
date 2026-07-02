@@ -19,10 +19,17 @@ export async function GET() {
 
   try {
     const stats = await loadUserStatsFromDb(userId);
-    return NextResponse.json({
-      success: true,
-      stats: stats ?? EMPTY_STATS,
-    });
+    return NextResponse.json(
+      {
+        success: true,
+        stats: stats ?? EMPTY_STATS,
+      },
+      {
+        headers: {
+          'Cache-Control': 'no-store',
+        },
+      }
+    );
   } catch (error) {
     console.error('[User Stats]', error);
     return NextResponse.json({ success: false, error: '加载失败' }, { status: 500 });

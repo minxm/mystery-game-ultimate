@@ -57,34 +57,15 @@ async function triggerBackgroundGeneration(
   difficulty: string,
   userId?: string | null
 ): Promise<void> {
-  if (isServerlessEnv()) {
-    const triggerRes = await fetch(`${origin}/.netlify/functions/generate-case-background`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ jobId, difficulty, userId }),
-    }).catch((e: unknown) => {
-      console.error('[API] Trigger Netlify background failed:', (e as Error)?.message);
-      return null;
-    });
-
-    if (!triggerRes || (triggerRes.status !== 202 && !triggerRes.ok)) {
-      throw new Error(
-        `后台生成任务触发失败${triggerRes ? `（HTTP ${triggerRes.status}）` : ''}`
-      );
-    }
-    console.log('[API] Netlify background job triggered:', jobId);
-    return;
-  }
-
-  // 本地开发：触发独立 worker 路由，立即返回 jobId，前端轮询 status
+  // Cloudflare / 本地：触发独立 worker 路由，立即返回 jobId，前端轮询 status
   void fetch(`${origin}/api/generate-case/worker`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ jobId, difficulty, userId }),
   }).catch((e: unknown) => {
-    console.error('[API] Local worker trigger failed:', (e as Error)?.message);
+    console.error('[API] Background worker trigger failed:', (e as Error)?.message);
   });
-  console.log('[API] Local worker job triggered:', jobId);
+  console.log('[API] Background worker job triggered:', jobId);
 }
 
 export async function POST(request: NextRequest) {

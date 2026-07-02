@@ -45,12 +45,12 @@ Redirect URL 添加：
 
 ```
 http://localhost:3000/auth/callback
-https://<your-netlify-domain>/auth/callback
+https://<your-cloudflare-domain>/auth/callback
 ```
 
-### 4. 环境变量（前端 Netlify）
+### 4. 环境变量（Cloudflare Workers）
 
-在 Netlify 或 `.env.local` 中配置：
+在 Cloudflare Dashboard 或 `.env.local` 中配置：
 
 ```env
 NEXT_PUBLIC_SUPABASE_URL=https://xxx.supabase.co
@@ -80,4 +80,4 @@ SUPABASE_SERVICE_ROLE_KEY=eyJ...   # 仅服务端，勿暴露给客户端
 ## 与主仓库的关系
 
 本仓库 SQL 迁移同步自 [mystery-game-ultimate/supabase](../mystery-game-ultimate/supabase)。  
-主仓库负责 Next.js 前端 + Netlify Functions 后台逻辑。
+主仓库负责 Next.js 前端 + Cloudflare Workers API 后台逻辑。

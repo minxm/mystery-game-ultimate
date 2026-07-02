@@ -5,6 +5,7 @@ import { uploadCaseImages } from '@/lib/supabase/storage';
 import { shareCaseToInventory } from '@/lib/case-inventory';
 import { logActivity } from '@/lib/supabase/database';
 import { setAiRequestContext, clearAiRequestContext } from '@/lib/ai-service';
+import { repairCaseMissingImages } from '@/lib/case-image-repair';
 
 async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -33,7 +34,7 @@ export interface CaseGenerationJobOptions {
 
 /**
  * 执行案件生成任务并写入 job store。
- * Netlify 后台函数与本地 /api/generate-case/worker 共用。
+ * Cloudflare Workers worker 路由与本地 /api/generate-case/worker 共用。
  */
 export async function executeCaseGenerationJob(
   jobId: string,
@@ -55,6 +56,11 @@ export async function executeCaseGenerationJob(
         : await buildPromise;
 
     caseData = await uploadCaseImages(caseData);
+    const { caseData: repaired, repaired: repairedIds } = await repairCaseMissingImages(caseData);
+    if (repairedIds.length) {
+      console.log('[CaseJob] Repaired missing images before save:', repairedIds.join(', '));
+      caseData = await uploadCaseImages(repaired);
+    }
     const shared = await shareCaseToInventory(caseData, difficulty, userId);
     if (!shared) {
       throw new Error('案件入库失败');

@@ -23,6 +23,8 @@ import CaseSocialPanel from '@/components/CaseSocialPanel';
 import { getAvatarPlaceholder, getScenePlaceholder } from '@/lib/placeholder';
 import { normalizeTruthShape } from '@/lib/case-schema';
 import { getScoreRating, formatTime } from '@/lib/utils';
+import { authenticatedFetch } from '@/lib/authenticated-fetch';
+import { loadLocalArchive } from '@/lib/archive-local';
 import type { CaseData, InterrogationMessage } from '@/lib/types';
 
 interface ArchiveEvaluation {
@@ -57,16 +59,26 @@ export default function CaseArchivePage() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(`/api/cases/archive/${encodeURIComponent(caseId)}`);
+        const res = await authenticatedFetch(`/api/cases/archive/${encodeURIComponent(caseId)}`);
         const data = await res.json();
         if (cancelled) return;
-        if (!res.ok || !data.success || !data.archive) {
-          setError(data.error || '无法加载案件档案');
+        if (res.ok && data.success && data.archive) {
+          setArchive(data.archive as ArchivePayload);
           return;
         }
-        setArchive(data.archive as ArchivePayload);
+        const local = await loadLocalArchive(caseId);
+        if (cancelled) return;
+        if (local) {
+          setArchive(local as ArchivePayload);
+          return;
+        }
+        setError(data.error || '无法加载案件档案');
       } catch {
-        if (!cancelled) setError('加载失败');
+        if (!cancelled) {
+          const local = await loadLocalArchive(caseId);
+          if (local) setArchive(local as ArchivePayload);
+          else setError('加载失败');
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -311,7 +323,7 @@ export default function CaseArchivePage() {
 
         {/* 分享 & 同类生成 */}
         <section className="glass-panel p-5 mb-6">
-          <CaseSocialPanel caseId={caseData.id} caseTitle={caseData.title} />
+          <CaseSocialPanel caseId={caseData.id} caseTitle={caseData.title} caseData={caseData} />
         </section>
 
         <div className="flex flex-col sm:flex-row gap-3">

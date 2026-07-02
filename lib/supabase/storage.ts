@@ -4,11 +4,22 @@ import { CaseData } from '@/lib/types';
 const BUCKET = 'case-images';
 
 function parseDataUrl(dataUrl: string): { buffer: Buffer; mime: string; ext: string } | null {
-  const match = dataUrl.match(/^data:(image\/\w+);base64,(.+)$/);
-  if (!match) return null;
-  const mime = match[1];
-  const ext = mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : 'jpg';
-  return { buffer: Buffer.from(match[2], 'base64'), mime, ext };
+  const imageMatch = dataUrl.match(/^data:(image\/\w+);base64,([\s\S]+)$/);
+  if (imageMatch) {
+    const mime = imageMatch[1];
+    const ext = mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : 'jpg';
+    return { buffer: Buffer.from(imageMatch[2], 'base64'), mime, ext };
+  }
+
+  const genericMatch = dataUrl.match(/^data:([^;]+);base64,([\s\S]+)$/);
+  if (genericMatch) {
+    const rawMime = genericMatch[1];
+    const mime = rawMime.startsWith('image/') ? rawMime : 'image/png';
+    const ext = mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : 'jpg';
+    return { buffer: Buffer.from(genericMatch[2], 'base64'), mime, ext };
+  }
+
+  return null;
 }
 
 /** 上传 base64 data URL 到 Supabase Storage，返回公开 URL */
@@ -71,4 +82,30 @@ export async function uploadCaseImages(caseData: CaseData): Promise<CaseData> {
   );
 
   return result;
+}
+
+/** 将内联封面图上传到 Storage，供列表页使用（避免响应体携带 MB 级 data URL） */
+export async function ensurePublicSceneImageUrl(
+  caseId: string,
+  url: string | null | undefined
+): Promise<string | null> {
+  if (!url) return null;
+  if (url.startsWith('http')) return url;
+  if (!url.startsWith('data:')) return null;
+
+  const uploaded = await uploadDataUrl(url, `${caseId}/scene.png`);
+  if (!uploaded?.startsWith('http')) return null;
+
+  const admin = createAdminClientSafe();
+  if (admin) {
+    const { error } = await admin
+      .from('cases')
+      .update({ scene_image_url: uploaded })
+      .eq('id', caseId);
+    if (error && !error.message.includes('scene_image_url')) {
+      console.warn('[Storage] scene_image_url update failed:', caseId, error.message);
+    }
+  }
+
+  return uploaded;
 }

@@ -1,5 +1,5 @@
 import { createServerClient } from '@supabase/ssr';
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import { getSupabaseAnonKey, getSupabaseUrl, isSupabaseConfigured } from './env';
 
 export async function createClient() {
@@ -32,7 +32,32 @@ export async function createClientSafe() {
   return createClient();
 }
 
-export async function getSessionUserId(): Promise<string | null> {
+export async function getUserIdFromAccessToken(accessToken: string): Promise<string | null> {
+  const supabase = await createClientSafe();
+  if (!supabase) return null;
+  const { data: { user }, error } = await supabase.auth.getUser(accessToken);
+  if (error || !user) return null;
+  return user.id;
+}
+
+/** 优先 Bearer token，其次 cookie session；Server Action 可传入 accessToken */
+export async function getSessionUserId(accessToken?: string | null): Promise<string | null> {
+  if (accessToken) {
+    const fromArg = await getUserIdFromAccessToken(accessToken);
+    if (fromArg) return fromArg;
+  }
+
+  try {
+    const headerStore = await headers();
+    const auth = headerStore.get('authorization');
+    if (auth?.startsWith('Bearer ')) {
+      const fromHeader = await getUserIdFromAccessToken(auth.slice('Bearer '.length).trim());
+      if (fromHeader) return fromHeader;
+    }
+  } catch {
+    /* headers() 在部分上下文不可用 */
+  }
+
   const supabase = await createClientSafe();
   if (!supabase) return null;
   const { data: { user } } = await supabase.auth.getUser();

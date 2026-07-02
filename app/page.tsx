@@ -16,9 +16,10 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import ParticleBackground from '@/components/ParticleBackground';
 import HomeAtmosphere, { HeroMagnifierIcon } from '@/components/HomeAtmosphere';
-import { UserStatsBar, RecommendedCasesPanel, PlayedCasesPanel } from '@/components/UserDashboard';
+import { RecommendedCasesPanel, PlayedCasesPanel, HomeDashboardProvider } from '@/components/UserDashboard';
 import Link from 'next/link';
 import { saveCaseData } from '@/lib/case-store';
+import { scrollWindowToTop } from '@/components/ScrollToTop';
 
 export default function HomePage() {
   const router = useRouter();
@@ -46,7 +47,8 @@ export default function HomePage() {
       if (startData.source === 'inventory' && startData.caseData) {
         setGeneratingStatus('案件已就绪，正在打开卷宗…');
         await saveCaseData(startData.caseData);
-        router.push(`/case/${startData.caseId ?? startData.caseData.id}`);
+        scrollWindowToTop();
+        router.push(`/case/${startData.caseId ?? startData.caseData.id}`, { scroll: true });
         return;
       }
 
@@ -56,8 +58,10 @@ export default function HomePage() {
       }
 
       setGeneratingStatus('正在 AI 生成全新案件…');
+      scrollWindowToTop();
       router.push(
-        `/generating/${startData.jobId}?difficulty=${encodeURIComponent(selectedDifficulty)}`
+        `/generating/${startData.jobId}?difficulty=${encodeURIComponent(selectedDifficulty)}`,
+        { scroll: true }
       );
     } catch (error: unknown) {
       console.error('[Frontend] Case generation failed:', error);
@@ -187,6 +191,7 @@ export default function HomePage() {
           ))}
         </motion.div>
 
+        <HomeDashboardProvider>
         {/* 难度选择 */}
         <motion.section
           initial={{ opacity: 0, y: 20 }}
@@ -194,7 +199,6 @@ export default function HomePage() {
           transition={{ delay: 0.45 }}
           className="max-w-3xl mx-auto"
         >
-          <UserStatsBar />
           <div className="flex items-center justify-center gap-3 mb-8">
             <div className="h-px w-12 bg-gradient-to-r from-transparent to-blue-500/40" />
             <h2 className="text-sm md:text-base font-bold tracking-[0.3em] text-blue-300/80 uppercase flex items-center gap-2">
@@ -273,6 +277,7 @@ export default function HomePage() {
 
         <RecommendedCasesPanel />
         <PlayedCasesPanel />
+        </HomeDashboardProvider>
 
         <footer className="mt-16 md:mt-24 text-center space-y-1">
           <p className="text-[10px] font-mono text-white/20 tracking-[0.2em]">

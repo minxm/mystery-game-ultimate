@@ -4,6 +4,7 @@ import { buildCaseFromPhases } from '@/lib/generate-case-orchestrator';
 import { uploadCaseImages } from '@/lib/supabase/storage';
 import { setAiRequestContext, clearAiRequestContext } from '@/lib/ai-service';
 import { authorizeCronBearer } from '@/lib/server-admin-auth';
+import { repairCaseMissingImages } from '@/lib/case-image-repair';
 
 export const maxDuration = 600;
 
@@ -44,6 +45,12 @@ export async function POST(request: NextRequest) {
           // 补货为后台批处理，无需写入 case_generation_jobs
           let caseData = await buildCaseFromPhases(difficulty);
           caseData = await uploadCaseImages(caseData);
+          const { caseData: repaired, repaired: repairedIds } =
+            await repairCaseMissingImages(caseData);
+          if (repairedIds.length) {
+            console.log('[Inventory] Repaired missing images:', repairedIds.join(', '));
+            caseData = await uploadCaseImages(repaired);
+          }
           await addCaseToInventory(caseData, difficulty);
           refilled.push({
             difficulty,

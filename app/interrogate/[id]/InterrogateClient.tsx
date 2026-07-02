@@ -5,12 +5,12 @@ import { useRouter, useParams } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, Send, Info, X } from 'lucide-react';
 import { CaseData, Suspect, InterrogationMessage } from '@/lib/types';
-import { storage, loadCaseData, findSuspectByParam, getSuspectId } from '@/lib/utils';
+import { storage, loadCaseData, findSuspectByParam, getSuspectId, saveInvestigateTab, investigatePageUrl } from '@/lib/utils';
 import { syncInterrogation } from '@/lib/cloud-sync';
 import { serializeCaseForPrompt } from '@/lib/case-prompt';
-import { getAvatarPlaceholder } from '@/lib/placeholder';
+import { CharacterPortrait } from '@/components/CharacterPortrait';
+import DetectiveChatAvatar from '@/components/DetectiveChatAvatar';
 import ParticleBackground from '@/components/ParticleBackground';
-import Image from 'next/image';
 
 function resolveSuspectParam(): string | null {
   if (typeof window === 'undefined') return null;
@@ -273,6 +273,11 @@ export default function InterrogateClient() {
     );
   }
 
+  const returnToInvestigate = (caseId: string) => {
+    saveInvestigateTab(caseId, 'suspects');
+    router.push(investigatePageUrl(caseId, 'suspects'));
+  };
+
   if (pageError || !caseData || !suspect) {
     return (
       <div className="min-h-screen flex items-center justify-center px-4 bg-dark-900">
@@ -281,7 +286,7 @@ export default function InterrogateClient() {
           <p className="text-gray-300 mb-6 text-sm">{pageError || '页面状态异常，请返回调查页重试。'}</p>
           <button
             type="button"
-            onClick={() => router.push(caseData ? `/investigate/${caseData.id}` : '/')}
+            onClick={() => returnToInvestigate(caseData?.id ?? (params.id as string))}
             className="px-6 py-3 rounded-xl font-bold text-sm transition"
             style={{ background: 'linear-gradient(135deg,#0066cc,#1e90ff)' }}
           >
@@ -307,7 +312,7 @@ export default function InterrogateClient() {
           {/* 返回按钮 */}
           <button
             type="button"
-            onClick={() => router.push(`/investigate/${caseData.id}`)}
+            onClick={() => returnToInvestigate(caseData.id)}
             className="flex items-center gap-1.5 text-blue-400/60 hover:text-blue-400 transition flex-shrink-0 p-1.5 rounded-lg hover:bg-blue-500/10"
           >
             <ArrowLeft className="w-4 h-4" />
@@ -318,21 +323,14 @@ export default function InterrogateClient() {
           <div className="flex items-center gap-2.5 flex-1 min-w-0 px-1">
             {/* 头像 */}
             <div className="relative w-9 h-9 rounded-full overflow-hidden border border-blood-500/60 flex-shrink-0 shadow-[0_0_12px_rgba(230,57,70,0.3)]">
-              {suspect.imageUrl && !imgError ? (
-                <Image
-                  src={suspect.imageUrl}
-                  alt={suspect.name}
-                  fill
-                  className="object-cover object-top"
-                  unoptimized
-                  onError={() => setImgError(true)}
-                />
-              ) : (
-                <div
-                  className="w-full h-full bg-cover bg-center"
-                  style={{ backgroundImage: `url("${getAvatarPlaceholder(suspect.name)}")` }}
-                />
-              )}
+              <CharacterPortrait
+                name={suspect.name}
+                imageUrl={suspect.imageUrl}
+                className="w-full h-full"
+                imageClassName="object-cover object-top"
+                broken={imgError}
+                onBroken={() => setImgError(true)}
+              />
             </div>
 
             {/* 名字和职业 */}
@@ -423,11 +421,14 @@ export default function InterrogateClient() {
               {/* 嫌疑人头像 */}
               {message.role === 'assistant' && (
                 <div className="relative w-7 h-7 rounded-full overflow-hidden border border-blood-500/40 flex-shrink-0 mb-0.5">
-                  {suspect.imageUrl && !imgError ? (
-                    <Image src={suspect.imageUrl} alt={suspect.name} fill className="object-cover object-top" unoptimized onError={() => setImgError(true)} />
-                  ) : (
-                    <div className="w-full h-full bg-cover bg-center" style={{ backgroundImage: `url("${getAvatarPlaceholder(suspect.name)}")` }} />
-                  )}
+                  <CharacterPortrait
+                    name={suspect.name}
+                    imageUrl={suspect.imageUrl}
+                    className="w-full h-full"
+                    imageClassName="object-cover object-top"
+                    broken={imgError}
+                    onBroken={() => setImgError(true)}
+                  />
                 </div>
               )}
 
@@ -459,11 +460,7 @@ export default function InterrogateClient() {
               </div>
 
               {/* 侦探图标 */}
-              {message.role === 'user' && (
-                <div className="w-7 h-7 rounded-full bg-blue-600/20 border border-blue-500/30 flex items-center justify-center flex-shrink-0 mb-0.5">
-                  <span className="text-xs">🔍</span>
-                </div>
-              )}
+              {message.role === 'user' && <DetectiveChatAvatar />}
             </motion.div>
             );
           })}

@@ -1,30 +1,26 @@
 'use server';
 
 import { fetchMonitorStats } from '@/lib/supabase/database';
+import { backfillInventoryClaims } from '@/lib/case-inventory';
 import { requireMonitorAccess } from '@/lib/server-admin-auth';
+import { EMPTY_MONITOR_STATS, normalizeMonitorStats } from './types';
 
-export type MonitorStatsPayload = NonNullable<Awaited<ReturnType<typeof fetchMonitorStats>>>;
-
-const EMPTY_STATS: MonitorStatsPayload = {
-  pendingJobs: 0,
-  recentPending: 0,
-  aiCallsLastHour: 0,
-  avgLatencyMs: 0,
-  tokensLastHour: 0,
-  inventory: [],
-  recentErrors: [],
-};
-
-export async function refreshMonitorStats(): Promise<{
+export async function refreshMonitorStats(accessToken?: string | null): Promise<{
   success: boolean;
-  stats?: MonitorStatsPayload;
+  stats?: ReturnType<typeof normalizeMonitorStats>;
   error?: string;
 }> {
-  const access = await requireMonitorAccess();
+  const access = await requireMonitorAccess(accessToken);
   if (!access.allowed) {
     return { success: false, error: '无权访问监控数据' };
   }
 
-  const stats = (await fetchMonitorStats()) ?? EMPTY_STATS;
-  return { success: true, stats };
+  try {
+    await backfillInventoryClaims();
+    const stats = normalizeMonitorStats((await fetchMonitorStats()) ?? EMPTY_MONITOR_STATS);
+    return { success: true, stats };
+  } catch (error) {
+    console.error('[Monitor] refreshMonitorStats failed:', error);
+    return { success: false, error: '加载监控数据失败' };
+  }
 }
